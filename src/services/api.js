@@ -1,11 +1,13 @@
-import { addRecord, createLocalId, findRecord, getCollection, getStore, nextSequence, saveStore, updateRecord as updateLocalRecord } from "./local-store.js";
+import { addRecord, createLocalId, findRecord, getCollection, getStore, JANATHA_ADMIN_LOGIN, JANATHA_HOSPITAL_CODE, JANATHA_HOSPITAL_ID, nextSequence, saveStore, updateRecord as updateLocalRecord } from "./local-store.js";
 
 const SESSION_KEY = "hocc_mvp_session_v1";
 const TOKEN_KEY = "hocc_access_token_v1";
 const REFRESH_TOKEN_KEY = "hocc_refresh_token_v1";
 
 const LOCAL_PASSWORD = "HoccTest@2026!";
+const JANATHA_ADMIN_PASSWORD = globalThis.__HOCC_ENV__?.VITE_JANATHA_ADMIN_PASSWORD || LOCAL_PASSWORD;
 const LOCAL_USERS = [
+  { id: "HA-JANATHA-001", username: JANATHA_ADMIN_LOGIN, email: JANATHA_ADMIN_LOGIN, name: "Janatha Hospitals Admin", role: "HOSPITAL_ADMIN", jobRole: "Hospital Admin", hospitalId: JANATHA_HOSPITAL_ID, hospitalCode: JANATHA_HOSPITAL_CODE, hospitalName: "Janatha Hospitals", accessScope: "ALL_BRANCHES", status: "Active" },
   { id: "local-hadmin", email: "hadmin@hocctest.local", name: "Hospital Admin", role: "HOSPITAL_ADMIN", jobRole: "Hospital Admin" },
   { id: "local-badmin", email: "badmin@hocctest.local", name: "Branch Admin", role: "BRANCH_ADMIN", jobRole: "Branch Admin" },
   { id: "local-doctor", email: "doctor@hocctest.local", name: "Dr. Murli", department: "General Medicine", role: "BRANCH_USER", jobRole: "Doctor", allowedPages: ["dashboard", "patients", "queue", "consultation", "ipd", "ipdPatient360", "lab", "radiology", "pharmacy", "admissions", "dailySheets", "dutyDoctor", "discharge", "doctorSchedule", "followups", "documents", "tasks", "notifications"] },
@@ -16,7 +18,18 @@ const LOCAL_USERS = [
   { id: "local-billing", email: "billing@hocctest.local", name: "Billing User", role: "BRANCH_USER", jobRole: "Billing User", allowedPages: ["dashboard", "billing", "payments", "claims", "ipd-billing", "checkout", "refunds", "billing-search", "reports", "alerts", "tasks"] },
   { id: "local-reception", email: "reception@hocctest.local", name: "Receptionist", role: "BRANCH_USER", jobRole: "Reception User", allowedPages: ["dashboard", "patients", "admissions", "billing"] },
   { id: "local-mortuary", email: "mortuary@hocctest.local", name: "Mortuary Officer", role: "BRANCH_USER", jobRole: "Mortuary Officer", allowedPages: ["dashboard", "mortuary", "mortuary-intake", "mortuary-storage", "mortuary-release", "mortuary-search", "documents", "reports", "alerts", "tasks"] }
-].map((user) => ({ ...user, hospitalId: "local-hospital", hospitalName: "HOCC Test Hospital", branchId: "local-branch", branchName: "Main Branch", allowedModules: user.allowedPages || [], status: "Active", mustChangePassword: false }));
+].map((user) => ({ hospitalId: "local-hospital", hospitalName: "HOCC Test Hospital", branchId: "local-branch", branchName: "Main Branch", status: "Active", mustChangePassword: false, ...user, allowedModules: user.allowedModules || user.allowedPages || [] }));
+
+function resolveLocalUserContext(user) {
+  if (!user) return null;
+  const storedUser = getCollection("users").find((item) => String(item.id) === String(user.id) || String(item.username || item.email || "").toLowerCase() === String(user.username || user.email || "").toLowerCase());
+  const merged = storedUser ? { ...user, ...storedUser, id: user.id, role: user.role } : { ...user };
+  if (merged.hospitalCode) {
+    const hospital = getCollection("hospitals").find((item) => String(item.hospitalCode || item.code || "").toUpperCase() === String(merged.hospitalCode).toUpperCase());
+    if (hospital) return { ...merged, hospitalId: hospital.id, hospitalName: hospital.name, hospitalCode: hospital.hospitalCode || hospital.code || merged.hospitalCode, accessScope: "ALL_BRANCHES", branchId: "", branchName: "" };
+  }
+  return merged;
+}
 
 const UNREACHABLE_MESSAGE = "Unable to connect to production server. Please contact system administrator.";
 
@@ -248,8 +261,14 @@ function localRequest(path, options = {}) {
   const method = options.method || "GET";
   const body = typeof options.body === "string" ? JSON.parse(options.body || "{}") : (options.body || {});
   if (path === "/auth/login" && method === "POST") {
-    const user = LOCAL_USERS.find((entry) => entry.email.toLowerCase() === String(body.email || "").trim().toLowerCase());
-    if (!user || body.password !== LOCAL_PASSWORD) throw new Error("Invalid username/email or password.");
+    const login = String(body.email || "").trim().toLowerCase();
+    const builtInUser = LOCAL_USERS.find((entry) => [entry.email, entry.username].filter(Boolean).some((value) => String(value).toLowerCase() === login));
+    const storedUser = getCollection("users").find((entry) => [entry.email, entry.username].filter(Boolean).some((value) => String(value).toLowerCase() === login));
+    const baseUser = builtInUser ? { ...builtInUser, ...(storedUser || {}) } : storedUser;
+    const expectedPassword = login === JANATHA_ADMIN_LOGIN ? JANATHA_ADMIN_PASSWORD : LOCAL_PASSWORD;
+    if (!baseUser || body.password !== expectedPassword) throw new Error("Invalid username or password");
+    const user = resolveLocalUserContext(baseUser);
+    if (String(user.status || "Active").toLowerCase() !== "active") throw new Error("Your account is inactive. Contact system administrator.");
     return { user: { ...user, lastLoginAt: new Date().toISOString() }, accessToken: `local-${user.id}`, refreshToken: `local-refresh-${user.id}` };
   }
   if (method === "GET") return localRead(path);
@@ -374,22 +393,57 @@ function localRequest(path, options = {}) {
     const sequence = nextSequence("queueTokens");
     return addRecord("queueTokens", { id: createLocalId("QUEUE"), tokenNumber: `A${String(sequence).padStart(3, "0")}`, patientId: appointment.patientId, appointmentId: appointment.id, patientName: appointment.patientName, mrn: appointment.mrn, department: appointment.department, doctor: appointment.doctor, visitType: appointment.visitType, priority: appointment.priority, status: "Vitals Pending", branchId: appointment.branchId, checkedInAt: new Date().toISOString(), createdAt: new Date().toISOString() });
   }
+  if (method === "POST" && cleanPath === "/visits/send-to-vitals") {
+    if (!body.patientId) throw new Error("Please select an existing patient.");
+    const patient = findRecord("patients", body.patientId);
+    if (!patient) throw new Error("Selected patient could not be found.");
+    const now = new Date().toISOString();
+    let appointment = body.appointmentId ? findRecord("appointments", body.appointmentId) : null;
+    if (body.appointmentId && !appointment) throw new Error("Appointment could not be found.");
+    if (!appointment) {
+      const appointmentSequence = nextSequence("appointments");
+      appointment = addRecord("appointments", {
+        id: createLocalId("APT"), appointmentNumber: `APT-${String(appointmentSequence).padStart(6, "0")}`,
+        patientId: patient.id, patientName: patient.name || patient.fullName || "Patient", mrn: patient.mrn || patient.uhid || "", mobile: patient.mobile || patient.mobileNumber || "",
+        department: body.department || "OPD", doctor: body.doctor || "Duty Doctor", doctorId: body.doctorId || "", visitType: body.visitType || "Walk-in",
+        date: body.date || now.slice(0, 10), time: body.time || now.slice(11, 16), branchId: body.branchId || patient.branchId || "",
+        status: "WAITING_FOR_VITALS", createdBy: body.createdBy || "", createdAt: now, updatedAt: now
+      });
+    } else {
+      appointment = updateLocalRecord("appointments", appointment.id, { status: "WAITING_FOR_VITALS", arrivedAt: appointment.arrivedAt || now, checkedInAt: now, updatedAt: now });
+    }
+    const existing = getCollection("queueTokens").find((token) => String(token.appointmentId) === String(appointment.id) && !["Completed", "Cancelled"].includes(token.status));
+    if (existing) return existing;
+    const sequence = nextSequence("queueTokens");
+    return addRecord("queueTokens", {
+      id: createLocalId("QUEUE"), tokenNumber: `A${String(sequence).padStart(3, "0")}`,
+      patientId: patient.id, appointmentId: appointment.id, patientName: patient.name || patient.fullName || "Patient", mrn: patient.mrn || patient.uhid || "",
+      age: patient.age || "", gender: patient.gender || "", mobile: patient.mobile || patient.mobileNumber || "",
+      department: appointment.department || body.department || "OPD", doctor: appointment.doctor || body.doctor || "Duty Doctor",
+      visitType: appointment.visitType || body.visitType || "OPD", priority: appointment.priority || body.priority || "Normal",
+      status: "WAITING_FOR_VITALS", branchId: appointment.branchId || body.branchId || patient.branchId || "", visitTime: now, checkedInAt: now, createdAt: now, updatedAt: now
+    });
+  }
   if (method === "POST" && cleanPath === "/vitals") {
     if (!body.patientId) throw new Error("Please select a patient.");
     const activeToken = store.queueTokens.find((token) =>
       (!body.queueTokenId || String(token.id) === String(body.queueTokenId)) &&
       String(token.patientId) === String(body.patientId) &&
-      ["Waiting", "Vitals Pending"].includes(token.status)
+      ["Waiting", "Vitals Pending", "WAITING_FOR_VITALS"].includes(token.status)
     );
     if (!activeToken) throw new Error("This patient is no longer waiting for OPD vitals.");
     const recordedAt = new Date().toISOString();
     const record = addRecord("vitals", { id: createLocalId("VITAL"), ...body, appointmentId: activeToken.appointmentId || body.appointmentId || "", queueTokenId: activeToken.id, recordedAt, status: "Recorded", createdAt: recordedAt });
-    if (activeToken) updateLocalRecord("queueTokens", activeToken.id, { status: "Ready for Doctor", vitalsRecordedAt: new Date().toISOString() });
+    if (activeToken) {
+      const readyStatus = activeToken.status === "WAITING_FOR_VITALS" ? "READY_FOR_DOCTOR" : "Ready for Doctor";
+      updateLocalRecord("queueTokens", activeToken.id, { status: readyStatus, vitalsRecordedAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+      if (activeToken.appointmentId) updateLocalRecord("appointments", activeToken.appointmentId, { status: readyStatus, vitalsRecordedAt: recordedAt, updatedAt: recordedAt });
+    }
     return record;
   }
   if (method === "POST" && cleanPath === "/consultations/start") {
-    const token = store.queueTokens.find((item) => String(item.id || item._id) === String(body.queueTokenId || "")) || store.queueTokens.find((item) => String(item.patientId) === String(body.patientId || "") && String(item.appointmentId) === String(body.appointmentId || "") && ["Ready for Doctor", "With Doctor"].includes(item.status));
-    if (!token || !["Ready for Doctor", "With Doctor"].includes(token.status) || !token.patientId || !token.appointmentId) throw new Error("A Ready-for-Doctor OPD encounter is required.");
+    const token = store.queueTokens.find((item) => String(item.id || item._id) === String(body.queueTokenId || "")) || store.queueTokens.find((item) => String(item.patientId) === String(body.patientId || "") && String(item.appointmentId) === String(body.appointmentId || "") && ["Ready for Doctor", "READY_FOR_DOCTOR", "With Doctor"].includes(item.status));
+    if (!token || !["Ready for Doctor", "READY_FOR_DOCTOR", "With Doctor"].includes(token.status) || !token.patientId || !token.appointmentId) throw new Error("A Ready-for-Doctor OPD encounter is required.");
     const tokenId = token.id || token._id;
     const patientQueueEncounters = store.queueTokens.filter((item) => String(item.patientId) === String(token.patientId) && !["Completed", "Cancelled"].includes(item.status));
     const vital = store.vitals.find((item) => {
@@ -475,10 +529,54 @@ function localRequest(path, options = {}) {
   if (method === "POST" && cleanPath === "/bills/generate") {
     if (!body.patientId) throw new Error("Please select a patient.");
     const patient = findRecord("patients", body.patientId);
-    const itemValues = [body.registrationFee, body.consultationFee].map(Number).filter(Number.isFinite);
-    const totalAmount = itemValues.reduce((sum, value) => sum + value, 0);
+    if (!patient) throw new Error("Please select an existing patient record.");
+    const serviceFields = [
+      ["Registration", body.registrationFee], ["Consultation", body.consultationFee],
+      ["Laboratory", body.labCharges], ["Radiology", body.radiologyCharges],
+      ["Pharmacy", body.pharmacyCharges], ["Procedures", body.procedureCharges],
+      ["Room / Bed Charges", body.bedCharges], ["Nursing Charges", body.nursingCharges],
+      ["Other Hospital Services", body.emergencyCharges]
+    ];
+    const parsedItems = (() => { try { return JSON.parse(body.billingItems || "[]"); } catch { return []; } })();
+    const items = (Array.isArray(parsedItems) && parsedItems.length ? parsedItems : serviceFields.map(([service, rate]) => ({ service, qty: 1, rate })))
+      .map((item) => {
+        const qty = Math.max(0, Number(item.qty || 1));
+        const rate = Math.max(0, Number(item.rate ?? item.amount ?? 0));
+        const discount = Math.max(0, Number(item.discount || 0));
+        const taxable = Math.max(0, qty * rate - discount);
+        const tax = Math.max(0, Number(item.tax || 0));
+        return { service: item.service || item.name || "Hospital service", qty, rate, discount, tax, amount: taxable + tax };
+      }).filter((item) => item.amount > 0);
+    if (!items.length) throw new Error("Add at least one billable service.");
+    const subtotal = items.reduce((sum, item) => sum + item.qty * item.rate, 0);
+    const itemDiscount = items.reduce((sum, item) => sum + item.discount, 0);
+    const discount = itemDiscount + Math.max(0, Number(body.discount || 0));
+    const tax = items.reduce((sum, item) => sum + item.tax, 0) + Math.max(0, Number(body.tax || 0));
+    const advanceAmount = Math.max(0, Number(body.advanceAmount || 0));
+    const totalAmount = Math.max(0, subtotal - discount + tax - advanceAmount);
     const sequence = nextSequence("bills");
-    return addRecord("bills", { id: createLocalId("BILL"), billNumber: `BILL-${String(sequence).padStart(6, "0")}`, ...body, patientName: patient?.name || "Patient", mrn: patient?.mrn || "", items: [{ name: "Registration Fee", amount: Number(body.registrationFee || 0) }, { name: "Consultation Fee", amount: Number(body.consultationFee || 0) }].filter((item) => item.amount > 0), totalAmount, paidAmount: body.markPaid === "Yes" ? totalAmount : 0, paymentStatus: body.markPaid === "Yes" ? "Paid" : "Pending", status: body.markPaid === "Yes" ? "Paid" : "Draft", createdAt: new Date().toISOString() });
+    const year = new Date().getFullYear();
+    const invoiceNumber = `INV-${year}-${String(sequence).padStart(6, "0")}`;
+    if (getCollection("bills").some((bill) => bill.invoiceNumber === invoiceNumber)) throw new Error("Invoice number already exists. Please try again.");
+    const paidAmount = body.markPaid === "Yes" ? totalAmount : Math.min(totalAmount, Math.max(0, Number(body.amountPaid || 0)));
+    const status = paidAmount >= totalAmount ? "Paid" : paidAmount > 0 ? "Partially Paid" : "Unpaid";
+    const now = new Date().toISOString();
+    return addRecord("bills", { id: createLocalId("BILL"), billNumber: invoiceNumber, invoiceNumber, ...body, patientName: patient.name || patient.fullName || "Patient", mrn: patient.mrn || patient.uhid || "", uhid: patient.uhid || patient.mrn || "", items, subtotal, discount, tax, advanceAmount, totalAmount, grandTotal: totalAmount, paidAmount, balanceDue: Math.max(0, totalAmount - paidAmount), paymentStatus: status, status, createdBy: body.createdBy || "", createdAt: now, updatedAt: now });
+  }
+  if (method === "POST" && pathParts[0] === "bills" && pathParts[2] === "payment") {
+    const billId = decodeURIComponent(pathParts[1] || "");
+    const bill = findRecord("bills", billId);
+    if (!bill) throw new Error("Invoice could not be found.");
+    if (bill.status === "Refunded") throw new Error("Refunded invoices cannot receive payments.");
+    const balance = Math.max(0, Number(bill.totalAmount || 0) - Number(bill.paidAmount || 0));
+    const amount = body.amount == null ? balance : Number(body.amount);
+    if (!Number.isFinite(amount) || amount <= 0 || amount > balance) throw new Error("Enter a payment amount within the outstanding balance.");
+    const now = new Date().toISOString();
+    const payment = addRecord("payments", { id: createLocalId("PAY"), billId, invoiceNumber: bill.invoiceNumber || bill.billNumber, patientId: bill.patientId, amount, method: body.method || body.paymentMethod || bill.paymentType || "Cash", reference: body.reference || "", receivedBy: body.receivedBy || body.createdBy || "", createdAt: now });
+    const paidAmount = Number(bill.paidAmount || 0) + amount;
+    const status = paidAmount >= Number(bill.totalAmount || 0) ? "Paid" : "Partially Paid";
+    updateLocalRecord("bills", billId, { paidAmount, balanceDue: Math.max(0, Number(bill.totalAmount || 0) - paidAmount), paymentStatus: status, status, paymentMethod: payment.method, paidAt: status === "Paid" ? now : bill.paidAt, updatedAt: now });
+    return payment;
   }
   if (method === "POST" && cleanPath === "/follow-ups") {
     if (!body.patientId) throw new Error("Please select a patient.");
@@ -750,8 +848,16 @@ function invalidateCache(prefix) {
   }
 }
 
-const list = (endpoint) => () => cachedRead(endpoint, []);
-const post = (endpoint) => (_user, payload = {}) => requestBackend(endpoint, { method: "POST", body: payload });
+function scopeHospitalRows(rows, endpoint, user) {
+  if (!Array.isArray(rows) || user?.role !== "HOSPITAL_ADMIN" || user?.accessScope !== "ALL_BRANCHES" || !user?.hospitalId) return rows;
+  if (endpoint === "/hospitals") return rows.filter((item) => String(item.id) === String(user.hospitalId) || String(item.hospitalCode || item.code || "").toUpperCase() === String(user.hospitalCode || "").toUpperCase());
+  if (endpoint === "/branches") return rows.filter((item) => String(item.hospitalId || "") === String(user.hospitalId) || String(item.hospitalCode || "").toUpperCase() === String(user.hospitalCode || "").toUpperCase());
+  const branchIds = new Set(cachedRead("/branches", []).filter((item) => String(item.hospitalId || "") === String(user.hospitalId) || String(item.hospitalCode || "").toUpperCase() === String(user.hospitalCode || "").toUpperCase()).map((item) => String(item.id)));
+  return rows.filter((item) => String(item.hospitalId || "") === String(user.hospitalId) || (item.branchId && branchIds.has(String(item.branchId))));
+}
+
+const list = (endpoint) => (user) => scopeHospitalRows(cachedRead(endpoint, []), endpoint, user);
+const post = (endpoint) => (user, payload = {}) => requestBackend(endpoint, { method: "POST", body: { ...payload, ...(user?.hospitalId && !payload.hospitalId ? { hospitalId: user.hospitalId } : {}), ...(user?.hospitalCode && !payload.hospitalCode ? { hospitalCode: user.hospitalCode } : {}) } });
 const patch = (endpoint) => (_user, id, payload = {}) => requestBackend(`${endpoint}/${encodeURIComponent(id)}`, { method: "PATCH", body: payload });
 
 function collectionEndpoint(collection) {
@@ -808,7 +914,11 @@ export function createProductionApiClient() {
         if (getApiMode() === "local") {
           const localUser = LOCAL_USERS.find((item) => String(item.id) === String(sessionUser.id) || String(item.email).toLowerCase() === String(sessionUser.email || "").toLowerCase());
           if (localUser) {
-            const refreshedUser = { ...sessionUser, ...localUser, lastLoginAt: sessionUser.lastLoginAt };
+            const refreshedUser = { ...sessionUser, ...resolveLocalUserContext(localUser), lastLoginAt: sessionUser.lastLoginAt };
+            if (String(refreshedUser.status || "Active").toLowerCase() !== "active") {
+              localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(REFRESH_TOKEN_KEY); localStorage.removeItem(SESSION_KEY);
+              return null;
+            }
             localStorage.setItem(SESSION_KEY, JSON.stringify(refreshedUser));
             return refreshedUser;
           }
@@ -892,6 +1002,7 @@ export function createProductionApiClient() {
     createAppointment: (user, payload = {}) => requestBackend("/appointments", { method: "POST", body: { ...payload, branchId: payload.branchId || user?.branchId || "", createdBy: user?.id || user?.email || "" } }),
     registerPatient: (user, payload = {}) => requestBackend("/patients", { method: "POST", body: { ...payload, branchId: payload.branchId || user?.branchId || "", createdBy: user?.id || user?.email || "" } }),
     checkInAppointment: (_user, appointmentId) => requestBackend("/visits/check-in", { method: "POST", body: { appointmentId } }),
+    sendToVitals: (user, payload = {}) => requestBackend("/visits/send-to-vitals", { method: "POST", body: { ...payload, branchId: payload.branchId || user?.branchId || "", createdBy: user?.id || user?.email || "" } }),
     recordVitals: (user, payload = {}) => requestBackend("/vitals", { method: "POST", body: { ...payload, branchId: payload.branchId || user?.branchId || "", recordedBy: user?.name || user?.email || "" } }),
     completeConsultation: post("/consultations"),
     startConsultation: (user, encounter) => requestBackend("/consultations/start", { method: "POST", body: { ...(typeof encounter === "object" ? encounter : { queueTokenId: encounter }), doctorId: user?.id || "", doctor: user?.name || "" } }),

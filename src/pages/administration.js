@@ -5,12 +5,24 @@ export function configurePageRenderers(context) {
 }
 
 export function hospitalsPage() {
-  if (currentUser.role !== ROLES.SUPER_ADMIN) return unauthorizedPage();
+  if (![ROLES.SUPER_ADMIN, ROLES.HOSPITAL_ADMIN].includes(currentUser.role)) return unauthorizedPage();
   const hospitals = api.hospitals(currentUser);
+  if (currentUser.role === ROLES.HOSPITAL_ADMIN) {
+    const hospital = hospitals.find((item) => String(item.id) === String(currentUser.hospitalId)) || hospitals[0] || null;
+    return `<section class="panel hospital-profile-page">
+      <div class="panel-head"><div><h3>Hospital Profile</h3><p>Hospital information, registration, address and contact overview.</p></div>${hospital ? `<button class="button primary" type="button" data-action="edit-hospital-profile" data-id="${escapeHtml(hospital.id)}">Edit Profile</button>` : gridAddButton("Hospital Profile", "create-hospital")}</div>
+      ${hospital ? `<div class="hospital-profile-card">
+        <div class="hospital-profile-identity">${hospital.logoDataUrl || hospital.logoUrl || hospital.logo ? `<img src="${escapeAttribute(hospital.logoDataUrl || hospital.logoUrl || hospital.logo)}" alt="${escapeAttribute(hospital.name)} logo" />` : `<span class="hospital-logo-placeholder">H</span>`}<div><p class="eyebrow">Parent Organization</p><h2>${escapeHtml(hospital.name)}</h2><p>${escapeHtml(hospital.hospitalType || "Hospital")}</p></div>${badge(hospital.status || "Active", statusClass(hospital.status || "Active"))}</div>
+        <div class="hospital-profile-details">
+          ${[["Hospital Code", hospital.hospitalCode || hospital.code], ["Hospital Type", hospital.hospitalType], ["Registration Number", hospital.registrationNumber], ["Address", hospital.address], ["City", hospital.city], ["State", hospital.state], ["PIN Code", hospital.pinCode], ["Contact Number", hospital.contactNumber || hospital.contact], ["Email", hospital.email], ["Website", hospital.website]].filter(([, value]) => value).map(([label, value]) => `<span><small>${escapeHtml(label)}</small><strong>${label === "Website" ? `<a href="${escapeAttribute(/^https?:\/\//i.test(value) ? value : `https://${value}`)}" target="_blank" rel="noreferrer">${escapeHtml(value)}</a>` : escapeHtml(value)}</strong></span>`).join("")}
+        </div>
+      </div>` : `<div class="compact-empty"><strong>No hospital profile has been created yet.</strong><button class="button primary small" type="button" data-action="open-create" data-form-action="create-hospital">+ Create Hospital Profile</button></div>`}
+    </section>`;
+  }
   return `
     <section class="panel">
       <div class="panel-head">
-        <div><h3>Hospital customers</h3><p>Manage hospital groups. Create admin logins from the Admin Users page.</p></div>
+        <div><h3>${currentUser.role === ROLES.HOSPITAL_ADMIN ? "Hospital Profile" : "Hospital customers"}</h3><p>${currentUser.role === ROLES.HOSPITAL_ADMIN ? "Hospital information, registration, address and contact overview." : "Manage hospital groups. Create admin logins from the Admin Users page."}</p></div>
         <div class="button-row"><span class="badge status-active">${hospitals.length} visible</span>${gridAddButton("Hospital", "create-hospital")}</div>
       </div>
       ${table(["Hospital", "Owner", "Status", "Plan", "Branches", "Users", "Storage", "Actions"], hospitals.map((hospital) => [
@@ -30,27 +42,31 @@ export function hospitalsPage() {
 export function branchesPage() {
   const branches = api.branches(currentUser);
   const isSuperAdmin = currentUser.role === ROLES.SUPER_ADMIN;
-  const headers = ["Branch", "Type", "City", "Status", "Beds", "Rooms", "Risk", ...(isSuperAdmin ? ["Patient Portal", "Public Booking"] : []), "Actions"];
+  const canManage = currentUser.role === ROLES.HOSPITAL_ADMIN && hasPermission(currentUser, "branches", "edit");
+  const branchAdmins = safeOptionalData(() => api.users(currentUser), []).filter((user) => [ROLES.BRANCH_ADMIN, "BRANCH_ADMIN"].includes(user.role));
+  const headers = ["Branch", "Code", "Location", "Contact", "Branch Admin", "Status", "Actions"];
   return `
-    <section class="panel">
+    <section class="panel branch-management" data-branch-management>
       <div class="panel-head">
-        <div><h3>Hospital branches</h3><p>These are physical branch locations. Branch Admin users are managed separately in Admin Users. Risk reflects open critical alerts and go-live gaps (no department, no staff, or no wards/beds configured) for that branch.${isSuperAdmin ? " Super Admin controls which branches can offer patient portal access and public website/QR booking." : ""}</p></div>
-        <div class="button-row"><span class="badge status-active">${branches.length} visible</span>${gridAddButton("Branch", "create-branch")}</div>
+        <div><h3>Branch Management</h3><p>Create and manage hospital branches.</p></div>
+        ${canManage ? `<div class="button-row">${gridAddButton("Branch", "create-branch")}<button class="button primary" type="button" data-action="open-create" data-form-action="create-branch">+ Add Branch</button></div>` : ""}
       </div>
-      ${table(headers, branches.map((branch) => [
-        branch.name,
-        branch.branchType || "Main Branch",
-        branch.city,
-        badge(branch.status, statusClass(branch.status)),
-        branch.beds,
-        branch.rooms,
-        badge(branch.risk || "Low", riskClass(branch.risk || "Low")),
-        ...(isSuperAdmin ? [
-          `<div class="grid-actions">${badge(branch.patientPortalEnabled ? "Enabled" : "Disabled", branch.patientPortalEnabled ? "status-active" : "status-draft")}<button class="button tiny soft" type="button" data-action="toggle-branch-patient-portal" data-branch-id="${branch.id}" data-enabled="${branch.patientPortalEnabled ? "true" : "false"}">${branch.patientPortalEnabled ? "Disable" : "Enable"}</button></div>`,
-          `<div class="grid-actions">${badge(branch.publicBookingEnabled ? "Enabled" : "Disabled", branch.publicBookingEnabled ? "status-active" : "status-draft")}<button class="button tiny soft" type="button" data-action="toggle-branch-public-booking" data-branch-id="${branch.id}" data-enabled="${branch.publicBookingEnabled ? "true" : "false"}">${branch.publicBookingEnabled ? "Disable" : "Enable"}</button>${publicBookingLinkBlock(branch)}</div>`
-        ] : []),
-        gridActions("branches", branch.id)
-      ]))}
+      ${branches.length ? `
+        <div class="branch-list-tools">
+          <input class="panel-search" type="search" placeholder="Search branch by name, code or city" data-branch-search />
+          <label class="inline-filter">Status<select data-branch-status><option value="all">All Status</option><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
+        </div>
+        ${table(headers, branches.map((branch) => ({ attrs: { "data-branch-row": true, "data-branch-search-text": `${branch.name || ""} ${branch.branchCode || branch.code || ""} ${branch.city || ""}`.toLowerCase(), "data-branch-status-value": String(branch.status || "Active").toLowerCase() }, cells: [
+          `<strong>${escapeHtml(branch.name)}</strong>`,
+          branch.branchCode || branch.code || "-",
+          [branch.city, branch.state].filter(Boolean).join(", ") || "-",
+          branch.contactNumber || branch.contact || branch.phone || "-",
+          branchAdmins.find((user) => String(user.branchId) === String(branch.id))?.name || "Not Assigned",
+          badge(branch.status || "Active", statusClass(branch.status || "Active")),
+          `<div class="grid-actions"><button class="button tiny soft" type="button" data-action="view-branch" data-id="${escapeHtml(branch.id)}">View</button>${canManage ? `<button class="button tiny soft" type="button" data-action="open-edit" data-collection="branches" data-id="${escapeHtml(branch.id)}">Edit</button><button class="button tiny ${String(branch.status || "Active").toLowerCase() === "active" ? "danger" : "soft"}" type="button" data-action="toggle-branch-status" data-id="${escapeHtml(branch.id)}" data-status="${escapeHtml(branch.status || "Active")}">${String(branch.status || "Active").toLowerCase() === "active" ? "Deactivate" : "Activate"}</button>` : ""}</div>`
+        ] })))}
+        <p class="compact-empty hidden" data-branch-filter-empty>No branches match your search.</p>
+      ` : `<div class="compact-empty"><strong>No branches have been created yet.</strong>${canManage ? `<button class="button primary small" type="button" data-action="open-create" data-form-action="create-branch">+ Add First Branch</button>` : ""}</div>`}
     </section>
   `;
 }
@@ -275,44 +291,22 @@ export function doctorSchedulePage() {
 }
 
 export function staffRosterPage() {
-  const rosters = api.staffRosters(currentUser);
+  if (currentUser.role !== ROLES.HOSPITAL_ADMIN) return unauthorizedPage();
+  const branches = api.branches(currentUser);
+  const staff = api.users(currentUser).filter((user) => user.role === ROLES.BRANCH_USER && !["Branch Admin", "Sub-Branch Admin"].includes(user.jobRole));
+  const branchName = (branchId) => branches.find((branch) => String(branch.id) === String(branchId))?.name || "Not Assigned";
   return `
-    ${hasPermission(currentUser, "staffRoster", "create") ? `
-      <section class="panel">
-        <div class="panel-head"><h3>Create duty roster</h3></div>
-        <form class="form-grid" data-action="create-staff-roster">
-          <label>Staff user<input name="staffUser" required placeholder="Staff name" /></label>
-          <label>Role<select name="role"><option>Duty Doctor</option><option>Nurse</option><option>Reception User</option><option>Lab User</option><option>Pharmacy User</option><option>Billing User</option><option>Emergency Staff</option></select></label>
-          <label>Department/Ward<input name="departmentWard" value="" /></label>
-          <label>Date<input name="shiftDate" type="date" value="${localDateInputValue()}" /></label>
-          <label>Start<input name="shiftStart" type="time" value="08:00" /></label>
-          <label>End<input name="shiftEnd" type="time" value="16:00" /></label>
-          <label>Shift<select name="shiftType"><option>Morning</option><option>Evening</option><option>Night</option><option>Emergency</option><option>On-call</option></select></label>
-          <label>Handover<select name="handoverRequired"><option>Yes</option><option>No</option></select></label>
-          <button class="button primary" type="submit">Assign shift</button>
-        </form>
-      </section>
-    ` : ""}
-    <div class="metric-grid">
-      ${metricCard("Duty Doctors", rosters.filter((r) => r.role.includes("Doctor")).length, "Today")}
-      ${metricCard("Nurses", rosters.filter((r) => r.role === "Nurse").length, "Today")}
-      ${metricCard("Reception", rosters.filter((r) => r.role.includes("Reception")).length, "Desk")}
-      ${metricCard("Lab", rosters.filter((r) => r.role.includes("Lab")).length, "Duty")}
-      ${metricCard("Night Duty", rosters.filter((r) => r.shiftType === "Night").length, "Tonight")}
-      ${metricCard("Understaffed", api.alerts(currentUser).filter((a) => a.category === "Staff Roster").length, "Alerts")}
-    </div>
-    <section class="panel">
-      <div class="panel-head"><h3>Roster</h3></div>
-      ${table(["Staff", "Role", "Department/Ward", "Date", "Shift", "Time", "Handover", "Status"], rosters.map((item) => [
-        item.staffUser,
-        item.role,
-        item.departmentWard,
-        item.shiftDate,
-        item.shiftType,
-        `${item.shiftStart}-${item.shiftEnd}`,
-        item.handoverRequired,
-        badge(item.status, statusClass(item.status))
-      ]))}
+    <section class="panel staff-management">
+      <div class="panel-head"><div><h3>Staff Management</h3><p>Create employee logins and assign each employee to a role, branch and department.</p></div>${hasPermission(currentUser, "staffRoster", "create") ? `<button class="button primary" type="button" data-action="open-create" data-form-action="create-staff">+ Add Staff</button>` : ""}</div>
+      ${staff.length ? table(["Employee Name", "Login / Email", "Role", "Branch", "Department", "Status", "Actions"], staff.map((employee) => [
+        `<strong>${escapeHtml(employee.name || "-")}</strong>${employee.employeeId ? `<small class="table-subtext">${escapeHtml(employee.employeeId)}</small>` : ""}`,
+        `${escapeHtml(employee.email || "-")}${employee.contactEmail ? `<small class="table-subtext">${escapeHtml(employee.contactEmail)}</small>` : ""}`,
+        employee.jobRole || "-",
+        branchName(employee.branchId),
+        employee.department || "Not Assigned",
+        badge(employee.status || "Active", statusClass(employee.status || "Active")),
+        `<div class="grid-actions"><button class="button tiny soft" type="button" data-action="edit-staff" data-id="${escapeHtml(employee.id)}">Edit</button><button class="button tiny ${String(employee.status || "Active").toLowerCase() === "active" ? "danger" : "soft"}" type="button" data-action="toggle-staff-status" data-id="${escapeHtml(employee.id)}" data-status="${escapeHtml(employee.status || "Active")}">${String(employee.status || "Active").toLowerCase() === "active" ? "Deactivate" : "Activate"}</button><button class="button tiny soft" type="button" data-action="reset-staff-password" data-id="${escapeHtml(employee.id)}">Reset Password</button></div>`
+      ])) : `<div class="compact-empty"><strong>No staff accounts have been created yet.</strong>${hasPermission(currentUser, "staffRoster", "create") ? `<button class="button primary small" type="button" data-action="open-create" data-form-action="create-staff">+ Add Staff</button>` : ""}</div>`}
     </section>
   `;
 }
