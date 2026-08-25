@@ -37,7 +37,7 @@ export function appointmentsPage() {
         appointment.time,
         badge(appointment.priority, riskClass(appointment.priority === "Emergency" ? "Critical" : appointment.priority)),
         badge(appointment.status, statusClass(appointment.status)),
-        `<div class="grid-actions">${hasPermission(currentUser, "queue", "create") && canCheckIn(appointment) ? `<button class="button tiny ${appointment.status === "Arrived" ? "primary" : "soft"}" title="${appointment.status === "Arrived" ? "Check in and generate token" : "Confirm arrival"}" aria-label="${appointment.status === "Arrived" ? "Check in" : "Confirm arrival"}" data-action="check-in" data-appointment="${appointment.id}" data-testid="check-in-patient-button">${appointment.status === "Arrived" ? "Check-In" : "Confirm Arrival"}</button>` : ["Checked In", "Waiting", "Queued"].includes(appointment.status) ? `<span class="badge status-in-progress">In Queue</span>` : ""}${gridActions("appointments", appointment.id)}</div>`
+        `<div class="grid-actions">${hasPermission(currentUser, "queue", "create") && canCheckIn(appointment) ? (/reception/i.test(String(currentUser.jobRole || "")) ? `<button class="button tiny primary" title="Mark patient arrived and send to OPD vitals" aria-label="Send to Vitals" data-action="send-to-vitals" data-appointment="${appointment.id}" data-testid="send-to-vitals-button">Send to Vitals</button>` : `<button class="button tiny ${appointment.status === "Arrived" ? "primary" : "soft"}" title="${appointment.status === "Arrived" ? "Check in and generate token" : "Confirm arrival"}" aria-label="${appointment.status === "Arrived" ? "Check in" : "Confirm arrival"}" data-action="check-in" data-appointment="${appointment.id}" data-testid="check-in-patient-button">${appointment.status === "Arrived" ? "Check-In" : "Confirm Arrival"}</button>`) : ["Checked In", "Waiting", "Queued", "WAITING_FOR_VITALS"].includes(appointment.status) ? `<span class="badge status-in-progress">In Vitals Queue</span>` : ""}${gridActions("appointments", appointment.id)}</div>`
       ],
         attrs: {
           "data-route": "appointments",
@@ -142,7 +142,7 @@ export function queuePage() {
     const patients = safeData(() => api.patients(currentUser));
     const appointments = safeData(() => api.appointments(currentUser));
     const seen = new Set();
-    const ready = queue.filter((token) => token.status === "Ready for Doctor").filter((token) => {
+    const ready = queue.filter((token) => ["Ready for Doctor", "READY_FOR_DOCTOR"].includes(token.status)).filter((token) => {
       const key = String(token.appointmentId || token.id);
       if (seen.has(key)) return false;
       seen.add(key);
@@ -206,6 +206,7 @@ export function vitalsPage() {
   const vitals = safeData(() => api.vitals(currentUser));
   const queue = hasPermission(currentUser, "queue", "view") ? safeOptionalData(() => api.queueTokens(currentUser)) : [];
   const checkedInPatients = queue.filter((token) => ["Waiting", "Vitals Pending"].includes(token.status));
+  checkedInPatients.push(...queue.filter((token) => token.status === "WAITING_FOR_VITALS"));
   const selectedToken = checkedInPatients.find((token) => String(token.patientId) === String(selectedPatientId || "")) || null;
   const selectedPatient = findPatient(patients);
   const visibleVitals = selectedPatient ? vitals.filter((item) => String(item.patientId) === String(selectedPatient.id)) : vitals;
@@ -218,23 +219,23 @@ export function vitalsPage() {
     ${selectedPatient ? patientTimeline({ completed: ["registered", "appointment", "checkedIn"], current: "vitals" }) : ""}
     <div class="metric-grid small">
       ${metricCard("Waiting for vitals", checkedInPatients.length, "Nurse queue")}
-      ${metricCard("Ready for Doctor", queue.filter((item) => item.status === "Ready for Doctor").length, "Doctor handoff")}
+      ${metricCard("Ready for Doctor", queue.filter((item) => ["Ready for Doctor", "READY_FOR_DOCTOR"].includes(item.status)).length, "Doctor handoff")}
       ${metricCard("Recorded Today", recordedToday, "OPD readings")}
     </div>
     ${hasPermission(currentUser, "vitals", "create") ? `
       <section class="panel">
-        <div class="panel-head"><h3>OPD Vitals Queue</h3><p>Checked-in OPD patients waiting for nurse screening.</p></div>
-        ${!selectedToken && checkedInPatients.length ? table(["Token", "Patient", "MRN", "Department", "Doctor", "Waiting", "Status", "Action"], checkedInPatients.map((token) => [
-          token.tokenNumber,
+        <div class="panel-head"><div><h3>OPD Vitals Queue</h3><p>Active OPD patients waiting for nurse screening.</p></div><button class="button small primary" type="button" data-action="open-create" data-form-action="add-to-vitals-queue" aria-label="Add patient to vitals queue">＋</button></div>
+        ${!selectedToken && checkedInPatients.length ? table(["Patient", "MRN / UHID", "Age / Gender", "Department", "Doctor", "Visit Time", "Status", "Action"], checkedInPatients.map((token) => [
           token.patientName || patientName(patients, token.patientId),
           token.mrn || safeMrn(findPatient(patients, token.patientId)),
+          [token.age || findPatient(patients, token.patientId)?.age, token.gender || findPatient(patients, token.patientId)?.gender].filter(Boolean).join(" / ") || "-",
           token.department,
           token.doctor,
-          `${minutesSince(token.checkedInAt || token.createdAt)} min`,
+          formatDateTime(token.visitTime || token.checkedInAt || token.createdAt),
           badge(token.status, statusClass(token.status)),
           `<button class="button tiny primary" type="button" data-action="patient-record-vitals" data-patient="${escapeHtml(token.patientId)}" data-queue-token="${escapeHtml(token.id)}" data-testid="patient-action-record-vitals">Record Vitals</button>`
         ])) : ""}
-        ${!selectedToken && !checkedInPatients.length ? emptyState("No OPD patients are currently waiting for vitals.") : ""}
+        ${!selectedToken && !checkedInPatients.length ? `<p class="compact-empty">No OPD patients are currently waiting for vitals.</p>` : ""}
         ${selectedToken ? `<div class="notice subtle"><strong>${escapeHtml(selectedPatient?.name || selectedToken.patientName || "Patient")}</strong> · ${escapeHtml(selectedPatient?.mrn || selectedToken.mrn || "MRN pending")} · Token ${escapeHtml(selectedToken.tokenNumber || "-")} · ${escapeHtml(selectedToken.department || "Department not assigned")}</div>
         <form class="form-grid" data-action="record-vitals">
           <input type="hidden" name="patientId" value="${escapeHtml(selectedToken.patientId)}" />
@@ -245,6 +246,8 @@ export function vitalsPage() {
           <label>Pulse<input name="pulse" placeholder="76" /></label>
           <label>Respiratory rate<input name="respiratoryRate" placeholder="18" /></label>
           <label>SpO2<input name="spo2" placeholder="98%" data-testid="form-spo2" /></label>
+          <label>Weight<input name="weight" type="number" min="0" step="0.1" placeholder="kg" /></label>
+          <label>Height<input name="height" type="number" min="0" step="0.1" placeholder="cm" /></label>
           <label>Blood sugar<input name="bloodSugar" placeholder="110 mg/dL" /></label>
           <label>Pain score<input name="painScore" type="number" min="0" max="10" placeholder="0" /></label>
           <label class="span-2">Symptoms<input name="symptoms" placeholder="Patient-reported symptoms" /></label>
@@ -325,7 +328,7 @@ export function consultationPage() {
   const queue = hasPermission(currentUser, "queue", "view") ? safeOptionalData(() => api.queueTokens(currentUser)) : [];
   const selectedPatient = findPatient(patients);
   const data = deriveOperationalData();
-  const doctorQueue = queue.filter((token) => ["Ready for Doctor", "With Doctor"].includes(token.status));
+  const doctorQueue = queue.filter((token) => ["Ready for Doctor", "READY_FOR_DOCTOR", "With Doctor"].includes(token.status));
   const availablePatients = queue.length
     ? doctorQueue.map((token) => findPatient(patients, token.patientId) || {
         id: token.patientId,

@@ -6704,6 +6704,7 @@ import { configurePageRenderers as configureAdministrationPages, accessReviewPag
 import { configurePageRenderers as configureOperationsPages, alertsPage, claimsPage, globalSearchPage, inventoryPage, mappingPage, notificationsPage, recordsPage, reportsPage, tasksPage, uploadPage } from "../pages/operations.js";
 import { configurePageRenderers as configurePlatformPages, modulesPage, offersPage, productFlowPage, profilePage, subscriptionsPage } from "../pages/platform.js";
 import { nurseMyPatientsPage } from "../modules/nursing/my-patients.js";
+import { buildNursePatientRows } from "../modules/nursing/nurse-patient-data.js";
 import { handleNursePatientClick, handleNursePatientInput } from "../modules/nursing/nurse-patient-filters.js";
 import { linkedPatientRecords, setPatientSearchQuery, setPatientStatusFilter } from "../modules/reception/patient-filters.js";
 import { opdVitalsStage } from "../modules/opd/journey-status.js";
@@ -6738,6 +6739,7 @@ let goLiveChecklistCache = null;
 let goLiveChecklistCacheUserId = null;
 let receptionEnrollMessage = ""; // for success message after patient enrollment
 let receptionAdmissionMessage = ""; // for success message after admission creation
+let hospitalAdminBranchId = "all";
 
 initFrontendSentry();
 const localFrontendMode = getApiMode() === "local";
@@ -7259,6 +7261,30 @@ const BRANCH_ADMIN_NAV = [
   ["purchase", "Purchase Orders", "Inventory"]
 ];
 
+const HOSPITAL_ADMIN_NAV = [
+  ["dashboard", "Dashboard", "OVERVIEW"],
+  ["hospitals", "Hospital Profile", "ORGANIZATION"],
+  ["branches", "Branch Management", "ORGANIZATION"],
+  ["users", "Branch Admins", "ORGANIZATION"],
+  ["masterData", "Departments", "ORGANIZATION"],
+  ["staffRoster", "Staff Management", "ORGANIZATION"],
+  ["permissionTemplates", "Roles & Permissions", "ORGANIZATION"],
+  ["patients", "Patients", "OPERATIONS"],
+  ["appointments", "Appointments", "OPERATIONS"],
+  ["ipd", "OPD / IPD", "OPERATIONS"],
+  ["wards", "Wards & Beds", "OPERATIONS"],
+  ["billing", "Billing", "FINANCE"],
+  ["finance", "Services & Pricing", "FINANCE"],
+  ["stock", "Pharmacy Inventory", "SUPPORT SERVICES"],
+  ["records", "Laboratory Management", "SUPPORT SERVICES"],
+  ["compliance", "Radiology Management", "SUPPORT SERVICES"],
+  ["inventory", "Inventory", "SUPPORT SERVICES"],
+  ["reports", "Reports & Analytics", "INSIGHTS"],
+  ["notifications", "Notifications", "INSIGHTS"],
+  ["audit", "Audit Logs", "INSIGHTS"],
+  ["settings", "Settings", "SYSTEM"]
+];
+
 const NURSE_NAV = [
   ["dashboard", "Dashboard", "Overview"],
   ["patients", "My Patients", "Patient Care"],
@@ -7268,7 +7294,6 @@ const NURSE_NAV = [
   ["dailySheets", "Daily Sheets", "Nursing Care"],
   ["vitals", "OPD Vitals", "Clinical"],
   ["ipdVitals", "IPD Vitals", "Clinical"],
-  ["mar", "MAR", "Clinical"],
   ["dutyDoctor", "Doctor Orders", "Clinical"],
   ["intakeOutput", "Intake / Output", "Clinical"],
   ["handover", "Handover", "Handover"],
@@ -7942,6 +7967,7 @@ function authFrame(content) {
 }
 
 function renderShell(page, options = {}) {
+  const isHospitalAdmin = currentUser.role === ROLES.HOSPITAL_ADMIN;
   const isNurse = currentUser.role === ROLES.BRANCH_USER && String(currentUser.jobRole || "").toLowerCase() === "nurse";
   const isReception = currentUser.role === ROLES.BRANCH_USER && String(currentUser.jobRole || "").toLowerCase() === "reception user";
   const doctorRole = String(currentUser.jobRole || "").toLowerCase();
@@ -7953,9 +7979,9 @@ function renderShell(page, options = {}) {
   const isMortuary=currentUser.role===ROLES.BRANCH_USER&&/mortuary/.test(doctorRole);
   const isSurgeon = doctorRole === "surgeon";
   const isBranchAdmin = currentUser.role === ROLES.BRANCH_ADMIN;
-  const roleNav = isBranchAdmin ? BRANCH_ADMIN_NAV : isNurse ? NURSE_NAV : isReception ? RECEPTION_NAV : isDoctor ? DOCTOR_NAV : isPharmacy ? PHARMACY_NAV : isBilling ? BILLING_NAV : isLab ? LAB_NAV : isRadiology ? RADIOLOGY_NAV : isMortuary ? MORTUARY_NAV : (NAV_BY_ROLE[currentUser.role] || []).map(([key, label]) => [key, label, null]);
+  const roleNav = isHospitalAdmin ? HOSPITAL_ADMIN_NAV : isBranchAdmin ? BRANCH_ADMIN_NAV : isNurse ? NURSE_NAV : isReception ? RECEPTION_NAV : isDoctor ? DOCTOR_NAV : isPharmacy ? PHARMACY_NAV : isBilling ? BILLING_NAV : isLab ? LAB_NAV : isRadiology ? RADIOLOGY_NAV : isMortuary ? MORTUARY_NAV : (NAV_BY_ROLE[currentUser.role] || []).map(([key, label]) => [key, label, null]);
   const nav = roleNav.filter(([key, _label, group]) => canAccessPage(currentUser, key) && (group !== "Surgery" || isSurgeon));
-  const premiumRoleShell = isBranchAdmin || isNurse || isReception || isDoctor || isPharmacy || isBilling || isLab || isRadiology || isMortuary;
+  const premiumRoleShell = isHospitalAdmin || isBranchAdmin || isNurse || isReception || isDoctor || isPharmacy || isBilling || isLab || isRadiology || isMortuary;
   const branchOptions = hasPermission(currentUser, "branches", "view") ? safeData(() => api.branches(currentUser)) : [];
   const hospitalOptions = hasPermission(currentUser, "hospitals", "view") ? safeData(() => api.hospitals(currentUser)) : [];
   const notificationItems = hasPermission(currentUser, "notifications", "view") ? mergeNotifications() : [];
@@ -7967,7 +7993,7 @@ function renderShell(page, options = {}) {
 
   app.innerHTML = `
     <div class="app-shell">
-      <aside class="sidebar ${isBranchAdmin ? "branch-admin-sidebar" : isNurse ? "nurse-sidebar" : isReception ? "reception-sidebar" : isDoctor ? "doctor-sidebar" : isPharmacy ? "pharmacy-sidebar" : isBilling ? "billing-sidebar" : isLab ? "lab-sidebar" : isRadiology ? "radiology-sidebar" : isMortuary ? "mortuary-sidebar" : ""}">
+      <aside class="sidebar ${isHospitalAdmin ? "hospital-admin-sidebar" : isBranchAdmin ? "branch-admin-sidebar" : isNurse ? "nurse-sidebar" : isReception ? "reception-sidebar" : isDoctor ? "doctor-sidebar" : isPharmacy ? "pharmacy-sidebar" : isBilling ? "billing-sidebar" : isLab ? "lab-sidebar" : isRadiology ? "radiology-sidebar" : isMortuary ? "mortuary-sidebar" : ""}">
         <div class="logo-block">
           <div class="brand-mark">H</div>
           <div>
@@ -7984,27 +8010,27 @@ function renderShell(page, options = {}) {
           `).join("")}
         </nav>
         <div class="scope-card">
-          ${premiumRoleShell ? `<span class="nurse-avatar" aria-hidden="true">${isBranchAdmin ? "BA" : isNurse ? "N" : isReception ? "R" : isDoctor ? "Dr" : isPharmacy ? "Rx" : isBilling ? "B" : isLab ? "L" : isRadiology ? "R" : "M"}</span><div class="nurse-scope-copy">` : ""}
-          <span>${escapeHtml(isBranchAdmin ? "Branch Admin" : isDoctor ? currentUser.jobRole : isPharmacy ? "Pharmacist" : isBilling ? "Billing / Finance" : isLab ? "Laboratory" : isRadiology ? "Radiology" : isMortuary ? "Mortuary" : roleLabels[currentUser.role])}</span>
-          <strong>${escapeHtml(isBranchAdmin ? currentUser.name || "Branch Admin" : isNurse ? "Nurse" : isReception ? currentUser.name || "Receptionist" : isDoctor ? currentUser.name || "Doctor" : isPharmacy ? currentUser.name || "Pharmacy User" : isBilling ? currentUser.name || "Billing User" : isLab ? currentUser.name || "Lab User" : isRadiology ? currentUser.name || "Radiology User" : isMortuary ? currentUser.name || "Mortuary Officer" : scopeDescription(currentUser))}</strong>
-          <small>${escapeHtml(isBranchAdmin ? "Assigned branch access" : isNurse ? "Assigned ward / unit access" : isReception ? "Front Desk" : isDoctor ? currentUser.department || "Clinical Department" : isPharmacy ? currentUser.pharmacyName || "Pharmacist" : isBilling ? "Billing / Finance" : isLab ? "Laboratory" : isRadiology ? "Radiology" : isMortuary ? "Mortuary" : hospital?.name || "All hospitals")}${!premiumRoleShell && branchContext ? ` / ${escapeHtml(branchContext)}` : ""}</small>
-          ${premiumRoleShell ? `<small>${escapeHtml(isBranchAdmin ? "Main Branch" : isNurse ? "Assigned branch only" : currentUser.branchName || "Assigned Branch")}</small></div>` : ""}
+          ${premiumRoleShell ? `${isHospitalAdmin && (hospital?.logoDataUrl || hospital?.logoUrl || hospital?.logo) ? `<span class="nurse-avatar hospital-profile-avatar"><img src="${escapeAttribute(hospital.logoDataUrl || hospital.logoUrl || hospital.logo)}" alt="${escapeAttribute(hospital.name || "Hospital")} logo" /></span>` : `<span class="nurse-avatar" aria-hidden="true">${isHospitalAdmin ? "HA" : isBranchAdmin ? "BA" : isNurse ? "N" : isReception ? "R" : isDoctor ? "Dr" : isPharmacy ? "Rx" : isBilling ? "B" : isLab ? "L" : isRadiology ? "R" : "M"}</span>`}<div class="nurse-scope-copy">` : ""}
+          <span>${escapeHtml(isHospitalAdmin ? "Hospital Admin" : isBranchAdmin ? "Branch Admin" : isDoctor ? currentUser.jobRole : isPharmacy ? "Pharmacist" : isBilling ? "Billing / Finance" : isLab ? "Laboratory" : isRadiology ? "Radiology" : isMortuary ? "Mortuary" : roleLabels[currentUser.role])}</span>
+          <strong>${escapeHtml(isHospitalAdmin ? hospital?.name ? `${hospital.name} Admin` : currentUser.name || "Hospital Admin" : isBranchAdmin ? currentUser.name || "Branch Admin" : isNurse ? "Nurse" : isReception ? currentUser.name || "Receptionist" : isDoctor ? currentUser.name || "Doctor" : isPharmacy ? currentUser.name || "Pharmacy User" : isBilling ? currentUser.name || "Billing User" : isLab ? currentUser.name || "Lab User" : isRadiology ? currentUser.name || "Radiology User" : isMortuary ? currentUser.name || "Mortuary Officer" : scopeDescription(currentUser))}</strong>
+          <small>${escapeHtml(isHospitalAdmin ? hospital?.name || "All Branches" : isBranchAdmin ? "Assigned branch access" : isNurse ? "Assigned ward / unit access" : isReception ? "Front Desk" : isDoctor ? currentUser.department || "Clinical Department" : isPharmacy ? currentUser.pharmacyName || "Pharmacist" : isBilling ? "Billing / Finance" : isLab ? "Laboratory" : isRadiology ? "Radiology" : isMortuary ? "Mortuary" : hospital?.name || "All hospitals")}${!premiumRoleShell && branchContext ? ` / ${escapeHtml(branchContext)}` : ""}</small>
+          ${premiumRoleShell ? `<small>${escapeHtml(isHospitalAdmin ? "Administrator · All Branch Access" : isBranchAdmin ? "Main Branch" : isNurse ? "Assigned branch only" : currentUser.branchName || "Assigned Branch")}</small></div>` : ""}
         </div>
       </aside>
       <main class="main">
         <header class="topbar">
           <div>
-            <p class="eyebrow">${escapeHtml(isBranchAdmin ? "BRANCH ADMIN" : isDoctor ? currentUser.jobRole.toUpperCase() : isPharmacy ? "PHARMACY" : isBilling ? "BILLING" : isLab ? "LAB" : isRadiology ? "RADIOLOGY" : isMortuary ? "MORTUARY" : roleLabels[currentUser.role])}</p>
+            <p class="eyebrow">${escapeHtml(isHospitalAdmin ? "HOSPITAL ADMIN" : isBranchAdmin ? "BRANCH ADMIN" : isDoctor ? currentUser.jobRole.toUpperCase() : isPharmacy ? "PHARMACY" : isBilling ? "BILLING" : isLab ? "LAB" : isRadiology ? "RADIOLOGY" : isMortuary ? "MORTUARY" : roleLabels[currentUser.role])}</p>
             <h1 data-testid="page-title">${escapeHtml(options.forceUnauthorized ? "Access blocked" : currentPageTitle(page))}</h1>
             <div class="context-row">
-              <span>${escapeHtml(isDoctor && page === "notifications" ? "Main Branch" : isBranchAdmin || isPharmacy || isBilling || isLab || isRadiology || isMortuary ? currentUser.branchName || branch?.name || "Main Branch" : hospital?.name || "All hospitals")}</span>
+              <span>${escapeHtml(isDoctor && page === "notifications" ? "Main Branch" : isBranchAdmin || isPharmacy || isBilling || isLab || isRadiology || isMortuary ? currentUser.branchName || branch?.name || "Main Branch" : hospital?.name || (isHospitalAdmin ? "All Branches" : "All hospitals"))}</span>
               ${branch ? `<span>${escapeHtml(branchType)}</span><span>${escapeHtml(branch.name)}</span>` : ""}
               <span>${environmentLabel}</span>
             </div>
           </div>
           <div class="top-actions">
             <div class="top-search-wrap">
-              <input class="top-search" placeholder="Search MRN, patient, bill, admission" value="${escapeHtml(globalSearchQuery)}" data-global-search aria-label="Global search" />
+              <input class="top-search" placeholder="${isHospitalAdmin ? "Search patient, branch, staff, bill, appointment" : "Search MRN, patient, bill, admission"}" value="${escapeHtml(globalSearchQuery)}" data-global-search aria-label="Global search" />
               ${topSearchAutocomplete()}
             </div>
             ${hasPermission(currentUser, "notifications", "view") ? `<button class="button soft icon-action ${unreadNotificationCount ? "has-unread" : ""}" title="Notifications: ${escapeHtml(String(unreadNotificationCount))} unread" aria-label="Notifications: ${escapeHtml(String(unreadNotificationCount))} unread" type="button" data-action="toggle-notifications" aria-expanded="${notificationsDrawerOpen ? "true" : "false"}">${iconLabel("!", `Notifications ${unreadNotificationCount}`)}</button>` : ""}
@@ -8012,7 +8038,7 @@ function renderShell(page, options = {}) {
             <button class="button ghost" type="button" data-action="logout" data-testid="logout-button">Logout</button>
           </div>
         </header>
-        ${isPharmacy||isBilling||isLab||isRadiology||isMortuary?"":careCommandStrip(notificationItems,page,hospital,branch)}
+        ${isHospitalAdmin||isPharmacy||isBilling||isLab||isRadiology||isMortuary?"":careCommandStrip(notificationItems,page,hospital,branch)}
         <section class="content">
           ${options.forceUnauthorized ? unauthorizedPage(page) : options.loading ? pageSkeleton(page) : renderPage(page)}
         </section>
@@ -8025,6 +8051,7 @@ function renderShell(page, options = {}) {
   `;
   if (!options.loading && !options.forceUnauthorized) renderedPageKey = routeKey(page, options.query || parseHashRoute().query);
   wireCreateButtons();
+  enhanceEmptyStateActions(page);
   const appointmentForm = app.querySelector?.('form[data-action="create-appointment"]');
   if (appointmentForm) {
     fillAppointmentFromPatient(appointmentForm);
@@ -8101,7 +8128,7 @@ function doctorDashboardPage() {
   const data = deriveOperationalData();
   const doctorName = String(currentUser.name || "").toLowerCase();
   const assigned = (item) => !item.doctor && !item.admittingDoctor && !item.consultant || [item.doctor, item.admittingDoctor, item.consultant].some((value) => String(value || "").toLowerCase().includes(doctorName.replace(/^dr\.?\s*/, "")));
-  const ready = data.queue.filter((item) => item.status === "Ready for Doctor" && assigned(item));
+  const ready = data.queue.filter((item) => ["Ready for Doctor", "READY_FOR_DOCTOR"].includes(item.status) && assigned(item));
   const activeIpd = data.admissions.filter((item) => ["Admitted", "Under Treatment"].includes(item.admissionStatus || item.status) && assigned(item));
   const resultsReady = data.labOrders.filter((item) => ["Report Ready", "Completed"].includes(item.status) && assigned(item)).length;
   const followupsToday = (data.followUps || []).filter((item) => isToday(item.date || item.createdAt) && assigned(item)).length;
@@ -8149,10 +8176,183 @@ function roleShellPage(kicker, title, description, route, tabs, searchPlaceholde
   return `<section class="panel role-shell-workspace"><div class="panel-head"><div><p class="eyebrow">${escapeHtml(kicker)}</p><h3>${escapeHtml(title)}</h3><p>${escapeHtml(description)}</p></div></div>${pharmacyTabs(route, tabs)}${searchPlaceholder ? `<div class="pharmacy-search-box"><input type="search" placeholder="${escapeHtml(searchPlaceholder)}"/><button class="button primary" type="button">Search</button></div>` : ""}${emptyState(`No ${title.toLowerCase()} records are available for this filter.`)}</section>`;
 }
 
+function enhanceEmptyStateActions(page) {
+  if (!currentUser) return;
+  const configs = {
+    hospitals: ["create-hospital", currentUser.role === ROLES.HOSPITAL_ADMIN ? "Create Hospital Profile" : "Add Hospital", currentUser.role === ROLES.HOSPITAL_ADMIN ? "No hospital profile has been created yet." : "No hospital customers have been created yet.", "hospitals", "create"],
+    branches: ["create-branch", "Add Branch", "No branches have been created yet.", "branches", "create"],
+    users: ["create-user", currentUser.role === ROLES.HOSPITAL_ADMIN ? "Add Branch Admin" : "Add User", currentUser.role === ROLES.HOSPITAL_ADMIN ? "No branch administrators have been created yet." : "No users have been created yet.", "users", "manageUsers"],
+    masterData: ["create-master-data", "Add Department", "No departments have been created yet.", "masterData", "create"],
+    staffRoster: ["create-staff", "Add Staff", "No staff accounts have been created yet.", "staffRoster", "create"],
+    appointments: ["create-appointment", "Book Appointment", "No appointments found.", "appointments", "create"],
+    patients: ["register-patient", "Enroll Patient", "No patients have been registered yet.", "patients", "create"],
+    admissions: ["create-admission", "New Admission", "No admissions found.", "admissions", "create"],
+    billing: ["generate-bill", "Create Invoice", "No invoices found.", "billing", "create"],
+    finance: ["create-master-data", "Add Service", "No services or pricing records have been created yet.", "masterData", "create"],
+    stock: ["add-stock", "Add Medicine / Stock Item", "No medicine stock items have been created yet.", "stock", "create"],
+    inventory: ["create-master-data", "Add Inventory Item", "No inventory items have been created yet.", "masterData", "create"],
+    purchase: ["create-purchase-request", "Create Purchase Request", "No purchase requests found.", "purchase", "create"],
+    subscriptions: ["create-subscription", "Add Plan", "No subscription plans found.", "subscriptions", "create"],
+    offers: ["create-offer", "Add Offer", "No offers have been created yet.", "offers", "create"],
+    permissionTemplates: ["create-permission-template", "Add Role Template", "No permission templates have been created yet.", "permissionTemplates", "create"],
+    tasks: ["create-task", "Add Task", "No tasks have been created yet.", "tasks", "create"],
+    ot: ["schedule-surgery", "Add Surgery", "No surgeries have been scheduled.", "ot", "create"],
+    radiology: ["order-radiology", "Add Imaging", "No imaging orders found.", "radiology", "create"],
+    mortuary: ["register-death", "Add Mortuary Record", "No mortuary records found.", "mortuary", "create"]
+  };
+  let config = configs[page];
+  app.querySelectorAll?.(".content .empty").forEach((empty) => {
+    if (empty.querySelector("button, a") || empty.classList.contains("error-state")) return;
+    if (page === "wards") {
+      const heading = empty.closest(".panel")?.querySelector("h3")?.textContent || "";
+      config = /bed/i.test(heading) ? ["create-bed", "Add Bed", "No beds have been configured yet.", "beds", "create"] : ["create-ward", "Add Ward", "No wards have been configured yet.", "wards", "create"];
+    }
+    if (!config) return;
+    const [formAction, actionLabel, title, module, permission] = config;
+    if (!hasPermission(currentUser, module, permission) || !createForm(formAction)) return;
+    const strong = empty.querySelector("strong");
+    if (strong && /no records found|visible for your access scope|use add|no .* (yet|found)/i.test(strong.textContent || "")) strong.textContent = title;
+    const button = document.createElement("button");
+    button.className = "button primary small empty-state-action";
+    button.type = "button";
+    button.dataset.action = "open-create";
+    button.dataset.formAction = formAction;
+    button.textContent = `+ ${actionLabel}`;
+    empty.append(button);
+  });
+}
+
+function nurseDashboardPage() {
+  const rows = buildNursePatientRows({
+    currentUser,
+    patients: safeOptionalData(() => api.patients(currentUser), []),
+    admissions: safeOptionalData(() => api.admissions(currentUser), []),
+    vitals: safeOptionalData(() => api.ipdVitals(currentUser), []),
+    mar: safeOptionalData(() => api.medicationAdministrationRecords(currentUser), []),
+    tasks: safeOptionalData(() => api.tasks(currentUser), []),
+    alerts: safeOptionalData(() => api.alerts(currentUser), []),
+    nursingNotes: safeOptionalData(() => api.nursingNotes(currentUser), []),
+    intakeOutput: safeOptionalData(() => api.intakeOutputCharts(currentUser), [])
+  });
+  const tasks = safeOptionalData(() => api.tasks(currentUser), []).filter((item) => String(item.status || "").toLowerCase() !== "completed");
+  const alerts = safeOptionalData(() => api.alerts(currentUser), []).filter((item) => !["resolved", "closed", "completed"].includes(String(item.status || "").toLowerCase()));
+  const medicationRows = rows.filter((row) => row.medicationsDueCount > 0);
+  const vitalsRows = rows.filter((row) => row.vitalsDue);
+  const criticalRows = rows.filter((row) => row.status === "Critical" || row.criticalAlertsCount > 0);
+  const cards = [
+    ["Assigned Patients", rows.length, "patients"],
+    ["Pending Vitals", vitalsRows.length, "ipdVitals"],
+    ["Medications Due", medicationRows.reduce((sum, row) => sum + row.medicationsDueCount, 0), "mar"],
+    ["Pending Nursing Tasks", tasks.length, "tasks"],
+    ["Critical Patients", criticalRows.length, "alerts"]
+  ];
+  const compactList = (items, emptyMessage, renderer) => items.length
+    ? `<div class="nurse-dashboard-list">${items.slice(0, 5).map(renderer).join("")}</div>`
+    : `<p class="nurse-dashboard-empty">${escapeHtml(emptyMessage)}</p>`;
+  return `<div class="nurse-dashboard-only">
+    <div class="section-head nurse-dashboard-heading"><div><h2>Nurse Dashboard</h2><p>Assigned patient care for the current ward and shift.</p></div></div>
+    <div class="metric-grid nurse-dashboard-kpis">${cards.map(([label, value, route]) => `<button class="metric-card metric-link" type="button" data-route="${route}"><span class="nurse-kpi-icon">${navIcon(route)}</span><span>${escapeHtml(label)}</span><strong>${value}</strong><small>View records</small></button>`).join("")}</div>
+    <section class="nurse-dashboard-actions" aria-labelledby="nurse-quick-actions-title"><h3 id="nurse-quick-actions-title">Quick Actions</h3><div class="nurse-dashboard-action-grid">
+      <button class="reception-action" type="button" data-route="ipdVitals"><span>${actionIcon("record")}</span><strong>Record Vitals</strong></button>
+      <button class="reception-action" type="button" data-route="mar"><span>${actionIcon("medicine")}</span><strong>Give Medication</strong></button>
+      <button class="reception-action" type="button" data-route="nursing"><span>${actionIcon("add")}</span><strong>Add Nursing Note</strong></button>
+      <button class="reception-action" type="button" data-route="patients"><span>${actionIcon("update")}</span><strong>Update Patient Status</strong></button>
+    </div></section>
+    <div class="nurse-dashboard-sections">
+      <section class="nurse-dashboard-section"><div class="nurse-dashboard-section-head"><h3>My Patients</h3><button data-route="patients">View all</button></div>${compactList(rows, "No patients currently assigned.", (row) => `<button class="nurse-dashboard-row" data-route="patients" data-patient-id="${escapeHtml(row.patientId)}"><span><strong>${escapeHtml(row.name)}</strong><small>${escapeHtml(`${row.ward} · Bed ${row.bed}`)}</small></span><b>${escapeHtml(row.status)}</b></button>`)}</section>
+      <section class="nurse-dashboard-section"><div class="nurse-dashboard-section-head"><h3>Medication Due</h3><button data-route="mar">View all</button></div>${compactList(medicationRows, "No medications currently due.", (row) => `<button class="nurse-dashboard-row" data-route="mar" data-patient-id="${escapeHtml(row.patientId)}"><span><strong>${escapeHtml(row.name)}</strong><small>${escapeHtml(row.nextMedication?.medicine || row.nextMedication?.medication || "Scheduled medication")}</small></span><b>${row.medicationsDueCount} due</b></button>`)}</section>
+      <section class="nurse-dashboard-section"><div class="nurse-dashboard-section-head"><h3>Vitals Due</h3><button data-route="ipdVitals">View all</button></div>${compactList(vitalsRows, "No patient vitals currently due.", (row) => `<button class="nurse-dashboard-row" data-route="ipdVitals" data-patient-id="${escapeHtml(row.patientId)}"><span><strong>${escapeHtml(row.name)}</strong><small>${escapeHtml(`${row.ward} · Bed ${row.bed}`)}</small></span><b>Due</b></button>`)}</section>
+      <section class="nurse-dashboard-section"><div class="nurse-dashboard-section-head"><h3>Nursing Tasks</h3><button data-route="tasks">View all</button></div>${compactList(tasks, "No pending nursing tasks.", (item) => `<button class="nurse-dashboard-row" data-route="tasks"><span><strong>${escapeHtml(item.title || item.task || "Nursing task")}</strong><small>${escapeHtml(item.due || item.dueDate || "Pending")}</small></span><b>${escapeHtml(item.priority || "Open")}</b></button>`)}</section>
+      <section class="nurse-dashboard-section"><div class="nurse-dashboard-section-head"><h3>Alerts</h3><button data-route="alerts">View all</button></div>${compactList(alerts, "No active nursing alerts.", (item) => `<button class="nurse-dashboard-row" data-route="alerts"><span><strong>${escapeHtml(item.title || item.message || "Patient alert")}</strong><small>${escapeHtml(item.patientName || item.module || "Nursing")}</small></span><b>${escapeHtml(item.severity || item.priority || "Open")}</b></button>`)}</section>
+    </div>
+  </div>`;
+}
+
+function hospitalAdminScope(rows = []) {
+  return hospitalAdminBranchId === "all" ? rows : rows.filter((item) => String(item.branchId || "") === String(hospitalAdminBranchId));
+}
+
+function hospitalAdminOperationalAlerts(alerts = [], stocks = [], beds = [], bills = [], claims = []) {
+  const items = [];
+  const totalBeds = beds.length;
+  const availableBeds = beds.filter((bed) => String(bed.status || "Available") === "Available").length;
+  if (totalBeds && availableBeds / totalBeds < .15) items.push({ title: "Low bed availability", detail: `${availableBeds} of ${totalBeds} beds available`, route: "wards" });
+  const lowStock = stocks.filter((item) => Number(item.quantityAvailable || item.quantity || 0) <= Number(item.reorderLevel || 0));
+  if (lowStock.length) items.push({ title: "Low pharmacy stock", detail: `${lowStock.length} items require replenishment`, route: "stock" });
+  const pendingBills = bills.filter((bill) => !["Paid", "Refunded"].includes(bill.status));
+  if (pendingBills.length) items.push({ title: "Pending invoices", detail: `${pendingBills.length} invoices have outstanding balances`, route: "billing" });
+  const pendingClaims = claims.filter((claim) => !["Approved", "Rejected", "Paid"].includes(claim.status));
+  if (pendingClaims.length) items.push({ title: "Insurance claims pending", detail: `${pendingClaims.length} claims need review`, route: "billing" });
+  alerts.filter((item) => !item.patientId && !/clinical|vital|diagnos|treatment|medication/i.test(`${item.module || ""} ${item.title || ""}`)).slice(0, 5).forEach((item) => items.push({ title: item.title || "Operational alert", detail: item.message || item.department || "Needs administrative review", route: "notifications" }));
+  return items;
+}
+
+function hospitalAdminDashboardPage() {
+  const hospital = safeOptionalData(() => api.hospitals(currentUser), [])[0] || null;
+  const branches = safeOptionalData(() => api.branches(currentUser), []);
+  const patients = safeOptionalData(() => api.patients(currentUser), []);
+  const appointments = safeOptionalData(() => api.appointments(currentUser), []);
+  const admissions = safeOptionalData(() => api.admissions(currentUser), []);
+  const beds = safeOptionalData(() => api.beds(currentUser), []);
+  const bills = safeOptionalData(() => api.bills(currentUser), []);
+  const payments = safeOptionalData(() => api.payments(currentUser), []);
+  const users = safeOptionalData(() => api.accessReviewUsers(currentUser), []);
+  const alerts = safeOptionalData(() => api.alerts(currentUser), []);
+  const stocks = safeOptionalData(() => api.medicineStocks(currentUser), []);
+  const claims = safeOptionalData(() => api.claims(currentUser), []);
+  const scopedPatients = hospitalAdminScope(patients), scopedAppointments = hospitalAdminScope(appointments), scopedAdmissions = hospitalAdminScope(admissions), scopedBeds = hospitalAdminScope(beds), scopedBills = hospitalAdminScope(bills), scopedPayments = hospitalAdminScope(payments), scopedUsers = hospitalAdminScope(users), scopedStocks = hospitalAdminScope(stocks), scopedClaims = hospitalAdminScope(claims);
+  const todayAppointments = scopedAppointments.filter((item) => isToday(item.date || item.appointmentDate || item.createdAt));
+  const currentAdmissions = scopedAdmissions.filter((item) => !["Discharged", "Cancelled"].includes(item.admissionStatus || item.status));
+  const occupied = scopedBeds.filter((item) => item.status === "Occupied").length;
+  const todayRevenue = scopedPayments.filter((item) => isToday(item.createdAt || item.paidAt)).reduce((sum, item) => sum + Number(item.amount || item.paidAmount || 0), 0);
+  const pendingBills = scopedBills.filter((item) => !["Paid", "Refunded"].includes(item.status));
+  const activeStaff = scopedUsers.filter((item) => !["Inactive", "Disabled", "Suspended"].includes(item.status));
+  const operationalAlerts = hospitalAdminOperationalAlerts(alerts, scopedStocks, scopedBeds, scopedBills, scopedClaims);
+  const kpis = [["Total Patients", scopedPatients.length, "patients"], ["Today's Appointments", todayAppointments.length, "appointments"], ["Current Admissions", currentAdmissions.length, "ipd"], ["Bed Occupancy", scopedBeds.length ? `${Math.round(occupied / scopedBeds.length * 100)}%` : "0%", "wards"], ["Today's Revenue", currencyDisplay(todayRevenue), "billing"], ["Pending Bills", pendingBills.length, "billing"], ["Staff on Duty", activeStaff.length, "staffRoster"], ["Operational Alerts", operationalAlerts.length, "notifications"]];
+  const branchMetric = (branch) => {
+    const own = (rows) => rows.filter((item) => String(item.branchId || "") === String(branch.id));
+    const branchBeds = own(beds), branchBills = own(bills), branchPayments = own(payments);
+    const revenue = branchPayments.filter((item) => isToday(item.createdAt || item.paidAt)).reduce((sum, item) => sum + Number(item.amount || item.paidAmount || 0), 0);
+    const pending = branchBills.filter((item) => !["Paid", "Refunded"].includes(item.status)).reduce((sum, item) => sum + billBalanceAmount(item), 0);
+    return [branch.name || branch.branchName || "Branch", own(patients).filter((item) => isToday(item.createdAt)).length, own(appointments).filter((item) => isToday(item.date || item.createdAt)).length, own(admissions).filter((item) => !["Discharged", "Cancelled"].includes(item.admissionStatus || item.status)).length, branchBeds.length ? `${Math.round(branchBeds.filter((item) => item.status === "Occupied").length / branchBeds.length * 100)}%` : "0%", currencyDisplay(revenue), currencyDisplay(pending), `<button class="button tiny soft" data-action="select-admin-branch" data-branch-id="${escapeHtml(branch.id)}">Open</button>`];
+  };
+  const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0,0,0,0);
+  const monthRevenue = scopedPayments.filter((item) => new Date(item.createdAt || item.paidAt || 0) >= monthStart).reduce((sum, item) => sum + Number(item.amount || item.paidAmount || 0), 0);
+  const staffCount = (pattern) => activeStaff.filter((item) => pattern.test(String(item.jobRole || item.roleName || ""))).length;
+  return `<div class="hospital-admin-dashboard">
+    <div class="section-head"><div><h2>${escapeHtml(hospital?.name ? `${hospital.name} Dashboard` : "Hospital Dashboard")}</h2><p>Administrative, financial and operational command center.</p></div><label class="admin-branch-filter">Branch<select data-hospital-admin-branch><option value="all">All Branches</option>${branches.map((branch) => `<option value="${escapeHtml(branch.id)}" ${String(hospitalAdminBranchId) === String(branch.id) ? "selected" : ""}>${escapeHtml(branch.name || branch.branchName || "Branch")}</option>`).join("")}</select></label></div>
+    <div class="metric-grid hospital-admin-kpis">${kpis.map(([label,value,route]) => `<button class="metric-card metric-link" data-route="${route}"><span class="admin-kpi-icon">${navIcon(route)}</span><span>${escapeHtml(label)}</span><strong>${value}</strong><small>View records</small></button>`).join("")}</div>
+    <section class="panel admin-compact-panel"><div class="panel-head"><div><h3>${hospitalAdminBranchId === "all" ? "Branch Overview" : `Branch Overview — ${escapeHtml(branches.find((item) => String(item.id) === String(hospitalAdminBranchId))?.name || "Selected Branch")}`}</h3><p>Administrative performance across hospital branches.</p></div></div>${branches.length ? table(["Branch","Patients Today","Appointments","Admissions","Bed Occupancy","Revenue","Pending Bills",""], (hospitalAdminBranchId === "all" ? branches : branches.filter((item) => String(item.id) === String(hospitalAdminBranchId))).map(branchMetric)) : `<p class="compact-empty">No branches are configured.</p>`}</section>
+    <div class="admin-overview-grid">
+      <section class="panel admin-compact-panel"><div class="panel-head"><h3>Bed & Ward Overview</h3></div><div class="admin-inline-stats"><span><b>${scopedBeds.length}</b>Total Beds</span><span><b>${occupied}</b>Occupied</span><span><b>${scopedBeds.filter((b) => (b.status || "Available") === "Available").length}</b>Available</span><span><b>${scopedBeds.filter((b) => b.status === "Reserved").length}</b>Reserved</span><span><b>${scopedBeds.filter((b) => b.status === "Maintenance").length}</b>Maintenance</span></div></section>
+      <section class="panel admin-compact-panel"><div class="panel-head"><h3>Revenue Summary</h3></div><div class="admin-inline-stats"><span><b>${currencyDisplay(todayRevenue)}</b>Today</span><span><b>${currencyDisplay(monthRevenue)}</b>This Month</span><span><b>${currencyDisplay(pendingBills.reduce((sum,bill)=>sum+billBalanceAmount(bill),0))}</b>Pending</span><span><b>${scopedBills.filter((b)=>b.status==="Refunded").length}</b>Refunds</span><span><b>${scopedClaims.filter((c)=>!["Approved","Paid"].includes(c.status)).length}</b>Insurance Pending</span></div></section>
+      <section class="panel admin-compact-panel"><div class="panel-head"><h3>Staff Overview</h3></div><div class="admin-inline-stats"><span><b>${staffCount(/doctor|surgeon/i)}</b>Doctors</span><span><b>${staffCount(/nurse/i)}</b>Nurses</span><span><b>${staffCount(/reception/i)}</b>Reception</span><span><b>${staffCount(/billing|finance/i)}</b>Billing</span><span><b>${staffCount(/lab/i)}</b>Lab</span><span><b>${staffCount(/pharmacy/i)}</b>Pharmacy</span><span><b>${staffCount(/radiology/i)}</b>Radiology</span></div></section>
+      <section class="panel admin-compact-panel"><div class="panel-head"><h3>Operational Alerts</h3></div>${operationalAlerts.length ? `<div class="admin-alert-list">${operationalAlerts.slice(0,6).map((item)=>`<button data-route="${item.route}"><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.detail)}</small></button>`).join("")}</div>` : `<p class="compact-empty">No operational alerts require attention.</p>`}</section>
+    </div></div>`;
+}
+
+function hospitalAdminPatientsPage() {
+  const patients = hospitalAdminScope(safeOptionalData(() => api.patients(currentUser), []));
+  const appointments = hospitalAdminScope(safeOptionalData(() => api.appointments(currentUser), []));
+  const admissions = hospitalAdminScope(safeOptionalData(() => api.admissions(currentUser), []));
+  const branches = safeOptionalData(() => api.branches(currentUser), []);
+  return `<section class="panel"><div class="panel-head"><div><h3>Patients</h3><p>Administrative registration and visit visibility only.</p></div></div>${patients.length ? table(["Patient","MRN / UHID","Gender","Age","Mobile","Registration Date","Branch","OPD / IPD Status"], patients.map((patient)=>[patient.name || patient.fullName || "Patient", patient.mrn || patient.uhid || patient.id, patient.gender || "-", patient.age || "-", patient.mobile || patient.mobileNumber || "-", formatDateTime(patient.createdAt), branches.find((b)=>String(b.id)===String(patient.branchId))?.name || patient.branchName || "-", admissions.some((a)=>String(a.patientId)===String(patient.id)&&!["Discharged","Cancelled"].includes(a.status || a.admissionStatus)) ? "IPD" : appointments.some((a)=>String(a.patientId)===String(patient.id)&&!["Completed","Cancelled"].includes(a.status)) ? "OPD" : "Registered"])) : `<p class="compact-empty">No registered patients in this scope.</p>`}</section>`;
+}
+
+function hospitalAdminIpdPage() {
+  const admissions = hospitalAdminScope(safeOptionalData(() => api.admissions(currentUser), []));
+  const appointments = hospitalAdminScope(safeOptionalData(() => api.appointments(currentUser), []));
+  const branches = safeOptionalData(() => api.branches(currentUser), []);
+  return `<div class="metric-grid small">${metricCard("Current OPD", appointments.filter((a)=>!["Completed","Cancelled"].includes(a.status)).length,"Administrative count")}${metricCard("Current IPD", admissions.filter((a)=>!["Discharged","Cancelled"].includes(a.status || a.admissionStatus)).length,"Active admissions")}${metricCard("Discharges", admissions.filter((a)=>(a.status || a.admissionStatus)==="Discharged").length,"Recorded")}</div><section class="panel"><div class="panel-head"><div><h3>OPD / IPD Administration</h3><p>No diagnosis, treatment, vitals or clinical notes are shown.</p></div></div>${admissions.length ? table(["Admission","Patient","Branch","Ward","Bed","Admission Status","Admission Date"], admissions.map((a)=>[a.id || a.admissionId, a.patientName || a.mrn || a.patientId, branches.find((b)=>String(b.id)===String(a.branchId))?.name || a.branchName || "-", a.ward || a.wardName || "-", a.bedNumber || a.bed || "-", a.admissionStatus || a.status || "-", formatDateTime(a.admissionDate || a.admittedAt || a.createdAt)])) : `<p class="compact-empty">No admissions in this scope.</p>`}</section>`;
+}
+
+function hospitalAdminSupportPage(title, description, kind) {
+  const items = safeOptionalData(() => api.masterDataItems(currentUser), []).filter((item) => new RegExp(kind, "i").test(`${item.type || ""} ${item.category || ""} ${item.name || ""}`));
+  return `<section class="panel"><div class="panel-head"><div><h3>${escapeHtml(title)}</h3><p>${escapeHtml(description)}</p></div></div>${items.length ? table(["Service / Resource","Code","Branch","Price","Status"],items.map((item)=>[item.name || item.itemName || "-",item.code || item.itemCode || "-",item.branchName || item.branchId || "All Branches",currencyDisplay(item.price || item.amount || 0),item.status || "Active"])) : `<p class="compact-empty">No configured ${escapeHtml(title.toLowerCase())} records.</p>`}</section>`;
+}
+
 function billingDashboardPage() {
-  const bills = safeOptionalData(() => api.bills(currentUser), []), claims = safeOptionalData(() => api.claims(currentUser), []), checkouts = safeOptionalData(() => api.checkouts(currentUser), []), tasks = safeOptionalData(() => api.tasks(currentUser), []), alerts = safeOptionalData(() => api.alerts(currentUser), []);
-  const pending = bills.filter((item) => item.status !== "Paid"), collected = bills.filter((item) => item.status === "Paid" && isToday(billPaymentTimestamp(item) || item.updatedAt)).reduce((sum,item)=>sum+billPaidAmount(item),0);
-  return `<section class="panel role-page-heading"><div class="panel-head"><div><p class="eyebrow">Billing</p><h3>Today's Billing Work</h3><p>Billing and finance overview for ${escapeHtml(currentUser.branchName || "Main Branch")}.</p></div></div></section><div class="metric-grid small">${metricCard("Pending Bills",pending.length,"Open")}${metricCard("Pending Payments",pending.length,"Awaiting payment")}${metricCard("Collected Today",currencyDisplay(collected),"Paid")}${metricCard("Outstanding",currencyDisplay(pending.reduce((s,b)=>s+billBalanceAmount(b),0)),"Balance")}${metricCard("Claims Pending",claims.filter(i=>!["Approved","Rejected"].includes(i.status)).length,"Open")}${metricCard("Checkout Pending",checkouts.filter(i=>i.status!=="Completed").length,"Open")}${metricCard("Refund Requests",0,"No workflow yet")}${metricCard("Alerts",alerts.filter(i=>i.status!=="Resolved").length,"Open")}</div>`;
+  return billingFocusedDashboardPage(deriveOperationalData());
 }
 
 function labDashboardPage() {
@@ -8196,10 +8396,13 @@ function receptionEnrollPatientPage() {
       <label>ID Proof Type<select name="idProofType"><option value="">Select</option><option>Aadhaar</option><option>PAN</option><option>Voter ID</option><option>Passport</option><option>Driving License</option><option>Other</option></select></label>
       <label>ID Proof Number<input name="idProofNumber" placeholder="Enter ID number" /></label>
       <label>Insurance / Payment Type<select name="insurance"><option value="Self Pay">Self Pay</option><option>Insurance</option><option>Corporate</option><option>Government Scheme</option><option>Other</option></select></label>
+      <label>OPD Department<input name="department" placeholder="Required when sending to vitals" /></label>
+      <label>OPD Doctor<input name="doctor" placeholder="Required when sending to vitals" /></label>
       <div class="button-row span-2">
         <button class="button ghost" type="reset">Reset</button>
         <button class="button primary" type="button" data-route="records">Patient Records</button>
-        <button class="button primary" type="submit">Enroll Patient</button>
+        <button class="button soft" type="submit" name="enrollAction" value="save">Save Patient</button>
+        <button class="button primary" type="submit" name="enrollAction" value="send-to-vitals">Save &amp; Send to Vitals</button>
       </div>
     </form>
     ${message ? `<div class="notice success">${escapeHtml(message)}</div>` : ""}
@@ -8245,6 +8448,16 @@ function receptionEnrollPatientPage() {
         <div><h3>Enroll Patient Form</h3></div>
       </div>
       ${formHtml}
+      <div class="reception-existing-vitals">
+        <div><h3>Existing Patient</h3><p>Search and select an existing patient without creating a duplicate record.</p></div>
+        <form class="form-grid compact-grid" data-action="reception-existing-send-to-vitals">
+          <label class="span-2">Search Patient<input type="search" data-existing-patient-search placeholder="Search name, MRN / UHID or mobile" /></label>
+          <label class="span-2">Patient<select name="patientId" required data-existing-patient-select><option value="">Select patient</option>${patients.map((patient) => `<option value="${escapeHtml(patient.id)}" data-search="${escapeAttribute([patient.name, patient.fullName, patient.mrn, patient.uhid, patient.mobile, patient.mobileNumber].filter(Boolean).join(" ").toLowerCase())}">${escapeHtml(`${patient.name || patient.fullName || "Patient"} · ${patient.mrn || patient.uhid || patient.id} · ${patient.mobile || patient.mobileNumber || "No mobile"}`)}</option>`).join("")}</select></label>
+          <label>Department<input name="department" required placeholder="OPD department" /></label>
+          <label>Doctor<input name="doctor" required placeholder="Doctor" /></label>
+          <button class="button primary span-2" type="submit">Send to Vitals</button>
+        </form>
+      </div>
     </section>
     ${tableHtml}
   `;
@@ -8469,7 +8682,7 @@ function renderPage(page) {
   configureOperationsPages(pageContext);
   configurePlatformPages(pageContext);
   const pages = {
-    dashboard: currentUser.role === ROLES.BRANCH_USER && ["doctor", "surgeon"].includes(String(currentUser.jobRole || "").toLowerCase()) ? doctorDashboardPage : currentUser.role === ROLES.BRANCH_USER && /pharmacy|pharmacist/.test(String(currentUser.jobRole || "").toLowerCase()) ? pharmacyDashboardPage : currentUser.role === ROLES.BRANCH_USER && /billing|finance/.test(String(currentUser.jobRole||"").toLowerCase()) ? billingDashboardPage : currentUser.role === ROLES.BRANCH_USER && /lab/.test(String(currentUser.jobRole||"").toLowerCase()) ? labDashboardPage : dashboardPage,
+    dashboard: currentUser.role === ROLES.HOSPITAL_ADMIN ? hospitalAdminDashboardPage : currentUser.role === ROLES.BRANCH_USER && String(currentUser.jobRole || "").toLowerCase() === "nurse" ? nurseDashboardPage : currentUser.role === ROLES.BRANCH_USER && ["doctor", "surgeon"].includes(String(currentUser.jobRole || "").toLowerCase()) ? doctorDashboardPage : currentUser.role === ROLES.BRANCH_USER && /pharmacy|pharmacist/.test(String(currentUser.jobRole || "").toLowerCase()) ? pharmacyDashboardPage : currentUser.role === ROLES.BRANCH_USER && /billing|finance/.test(String(currentUser.jobRole||"").toLowerCase()) ? billingDashboardPage : currentUser.role === ROLES.BRANCH_USER && /lab/.test(String(currentUser.jobRole||"").toLowerCase()) ? labDashboardPage : dashboardPage,
     hospitals: hospitalsPage,
     branches: branchesPage,
     users: usersPage,
@@ -8487,10 +8700,10 @@ function renderPage(page) {
     purchase: purchasePage,
     feedback: feedbackPage,
     backup: backupPage,
-    compliance: compliancePage,
+    compliance: currentUser.role === ROLES.HOSPITAL_ADMIN ? () => hospitalAdminSupportPage("Radiology Management", "Imaging catalog, pricing, equipment and operational status only. Patient reports and images are excluded.", "radiology|imaging") : compliancePage,
     globalSearch: globalSearchPage,
     appointments: appointmentsPage,
-    patients: currentUser.role === ROLES.BRANCH_USER && String(currentUser.jobRole || "").toLowerCase() === "nurse"
+    patients: currentUser.role === ROLES.HOSPITAL_ADMIN ? hospitalAdminPatientsPage : currentUser.role === ROLES.BRANCH_USER && String(currentUser.jobRole || "").toLowerCase() === "nurse"
       ? () => nurseMyPatientsPage({ api, currentUser, safeData, safeOptionalData, escapeHtml })
       : currentUser.role === ROLES.BRANCH_USER && String(currentUser.jobRole || "").toLowerCase() === "reception user"
         ? receptionEnrollPatientPage
@@ -8523,7 +8736,7 @@ function renderPage(page) {
     admissions: currentUser.role === ROLES.BRANCH_USER && String(currentUser.jobRole || "").toLowerCase() === "reception user"
       ? receptionNewAdmissionPage
       : admissionsPage,
-    ipd: ipdPage,
+    ipd: currentUser.role === ROLES.HOSPITAL_ADMIN ? hospitalAdminIpdPage : ipdPage,
     ipdPatient360: ipdPatient360Page,
     emr: emrPage,
     deathSummary: deathSummaryPage,
@@ -8549,7 +8762,7 @@ function renderPage(page) {
     claims: currentUser.role===ROLES.BRANCH_USER&&/billing|finance/.test(String(currentUser.jobRole||"").toLowerCase())?billingClaimsPage:claimsPage,
     uploads: uploadPage,
     mapping: mappingPage,
-    records: currentUser.role === ROLES.BRANCH_USER && String(currentUser.jobRole || "").toLowerCase() === "reception user"
+    records: currentUser.role === ROLES.HOSPITAL_ADMIN ? () => hospitalAdminSupportPage("Laboratory Management", "Test catalog, pricing, staffing and operational status only. Patient results are excluded.", "lab|laboratory|test") : currentUser.role === ROLES.BRANCH_USER && String(currentUser.jobRole || "").toLowerCase() === "reception user"
       ? receptionPatientRecordsPage
       : recordsPage,
     "admission-records": currentUser.role === ROLES.BRANCH_USER && String(currentUser.jobRole || "").toLowerCase() === "reception user"
@@ -8718,6 +8931,7 @@ function deriveOperationalData() {
     labOrders: permitted("lab") ? safeOptionalData(() => api.labOrders(currentUser)) : [],
     pharmacyIssues: permitted("pharmacy") ? safeOptionalData(() => api.pharmacyIssues(currentUser)) : [],
     bills: permitted("billing") ? safeOptionalData(() => api.bills(currentUser)) : [],
+    payments: permitted("payments") || permitted("billing") ? safeOptionalData(() => api.payments(currentUser)) : [],
     checkouts: permitted("checkout") ? safeOptionalData(() => api.checkouts(currentUser)) : [],
     admissions: permitted("admissions") ? safeOptionalData(() => api.admissions(currentUser)) : [],
     beds: permitted("wards") || permitted("beds") ? safeOptionalData(() => api.beds(currentUser)) : [],
@@ -9261,9 +9475,53 @@ function queueDelayPanel(alerts = []) {
   `;
 }
 
+function receptionDashboardPage(data = deriveOperationalData()) {
+  const today = localDateInputValue();
+  const appointments = data.appointments.filter((item) => String(item.date || item.appointmentDate || "").slice(0, 10) === today);
+  const queue = data.queue.filter((item) => !["Completed", "Cancelled"].includes(item.status));
+  const registeredToday = data.patients.filter((item) => String(item.createdAt || "").slice(0, 10) === today);
+  const cards = [
+    ["Today's Appointments", appointments.length, "appointments"],
+    ["Waiting Patients", queue.length, "queue"],
+    ["Walk-in Patients", appointments.filter((item) => /walk/i.test(item.visitType || item.source || "")).length, "appointments"],
+    ["New Registrations", registeredToday.length, "patients"],
+    ["Pending Appointments", appointments.filter((item) => ["Booked", "Scheduled", "Pending"].includes(item.status)).length, "appointments"]
+  ];
+  return `<div class="reception-dashboard">
+    <div class="section-head reception-heading"><div><h2>Reception Dashboard</h2><p>Manage today's essential reception work.</p></div></div>
+    <div class="metric-grid reception-kpis">${cards.map(([label, value, route]) => `<button class="metric-card metric-link" type="button" data-route="${route}"><span class="reception-kpi-icon">${navIcon(route)}</span><span>${escapeHtml(label)}</span><strong>${value}</strong><small>View records</small></button>`).join("")}</div>
+    <section class="reception-quick-actions" aria-labelledby="reception-quick-actions-title">
+      <h3 id="reception-quick-actions-title">Quick Actions</h3>
+      <div class="reception-action-grid">
+        <button class="reception-action" type="button" data-action="open-create" data-form-action="register-patient"><span>${actionIcon("register")}</span><strong>Enroll Patient</strong></button>
+        <button class="reception-action" type="button" data-action="open-create" data-form-action="create-appointment"><span>${actionIcon("book")}</span><strong>Book Appointment</strong></button>
+        <button class="reception-action" type="button" data-action="open-create" data-form-action="create-admission"><span>${actionIcon("new")}</span><strong>New Admission</strong></button>
+        <button class="reception-action" type="button" data-action="open-create" data-form-action="generate-bill"><span>${actionIcon("bill")}</span><strong>Create Invoice</strong></button>
+      </div>
+    </section>
+  </div>`;
+}
+
+function billingFocusedDashboardPage(data = deriveOperationalData()) {
+  const today = localDateInputValue();
+  const bills = data.bills;
+  const todayBills = bills.filter((item) => String(item.createdAt || item.invoiceDate || "").slice(0, 10) === today);
+  const payments = data.payments || [];
+  const todayPayments = payments.filter((item) => String(item.createdAt || "").slice(0, 10) === today);
+  const pending = bills.filter((item) => !["Paid", "Refunded"].includes(item.status));
+  const refunded = bills.filter((item) => item.status === "Refunded" && String(item.updatedAt || item.createdAt || "").slice(0, 10) === today);
+  const cards = [["Today's Invoices", todayBills.length, "billing"], ["Today's Collection", `Rs. ${money(todayPayments.reduce((sum, item) => sum + Number(item.amount || 0), 0))}`, "payments"], ["Pending Amount", `Rs. ${money(pending.reduce((sum, item) => sum + Math.max(0, Number(item.totalAmount || 0) - Number(item.paidAmount || 0)), 0))}`, "billing"], ["Paid Invoices", bills.filter((item) => item.status === "Paid").length, "billing"], ["Pending Bills", pending.length, "billing"], ["Refunds Today", refunded.length, "refunds"]];
+  return `<div class="billing-dashboard"><div class="section-head"><div><h2>Billing Dashboard</h2><p>Create invoices, collect payments and review billing history.</p></div><button class="button primary" data-action="open-create" data-form-action="generate-bill">Create Invoice</button></div>
+    <div class="metric-grid reception-kpis">${cards.map(([label, value, route]) => `<button class="metric-card metric-link" type="button" data-route="${route}"><span>${escapeHtml(label)}</span><strong>${value}</strong><small>Open records</small></button>`).join("")}</div>
+    <section class="panel"><div class="panel-head"><div><h3>Billing Actions</h3><p>Find patient → add charges → generate invoice → collect payment.</p></div></div><div class="billing-action-grid"><button class="action-tile primary-tile" data-action="open-create" data-form-action="generate-bill"><strong>Create Invoice</strong><small>Start a patient invoice</small></button><button class="action-tile" data-route="billing"><strong>Pending Bills</strong><small>Outstanding balances</small></button><button class="action-tile" data-route="billing"><strong>Paid Bills</strong><small>Completed invoices</small></button><button class="action-tile" data-route="payments"><strong>Payment Collection</strong><small>Cash, card, UPI and split</small></button><button class="action-tile" data-route="refunds"><strong>Refunds</strong><small>Refund history</small></button><button class="action-tile" data-route="billing-search"><strong>Invoice History</strong><small>Search every invoice</small></button></div></section></div>`;
+}
+
 function dashboardPage() {
-  const data = normalizeDashboardData(api.dashboard(currentUser));
   const operationalData = deriveOperationalData();
+  const jobRole = String(currentUser.jobRole || "").toLowerCase();
+  if (jobRole.includes("reception")) return receptionDashboardPage(operationalData);
+  if (jobRole.includes("billing")) return billingFocusedDashboardPage(operationalData);
+  const data = normalizeDashboardData(api.dashboard(currentUser));
   const patientVolumeSeries = dateSeriesFromRows(
     [...operationalData.appointments, ...operationalData.admissions],
     () => 1,
@@ -9770,7 +10028,7 @@ function searchFilterBar(placeholder = "Search by name / MRN / mobile", chips = 
 function patientActions(patient) {
   const id = escapeHtml(patient.id);
   const isDoctor = ["doctor", "surgeon"].includes(String(currentUser.jobRole || "").toLowerCase());
-  const readyToken = isDoctor ? safeOptionalData(() => api.queueTokens(currentUser), []).find((item) => String(item.patientId) === String(patient.id) && item.status === "Ready for Doctor") : null;
+  const readyToken = isDoctor ? safeOptionalData(() => api.queueTokens(currentUser), []).find((item) => String(item.patientId) === String(patient.id) && ["Ready for Doctor", "READY_FOR_DOCTOR"].includes(item.status)) : null;
   const primary = hasPermission(currentUser, "consultation", "create") && (!isDoctor || readyToken)
     ? `<button class="button tiny primary" type="button" data-action="${isDoctor ? "doctor-start-consultation" : "patient-start-consultation"}" ${isDoctor ? `data-queue-token="${escapeHtml(readyToken.id)}"` : `data-patient="${id}"`} data-testid="patient-action-start-consultation">Start Consultation</button>`
     : `<button class="button tiny soft" type="button" data-action="patient-view" data-patient="${id}" data-testid="patient-action-view">Open Patient</button>`;
@@ -10595,6 +10853,7 @@ function gridAddButton(label, formAction) {
     "create-ward": "wards",
     "create-bed": "beds",
     "create-user": "users",
+    "create-staff": "staffRoster",
     "create-subscription": "subscriptions",
     "create-offer": "offers",
     "schedule-surgery": "ot",
@@ -10972,6 +11231,7 @@ function createForm(action) {
   const branches = hasPermission(currentUser, "branches", "view") ? safeOptionalData(() => api.branches(currentUser)) : [];
   const patientFormActions = new Set([
     "register-patient",
+    "add-to-vitals-queue",
     "create-appointment",
     "record-vitals",
     "complete-consultation",
@@ -10985,6 +11245,13 @@ function createForm(action) {
   const patients = patientFormActions.has(action) && hasPermission(currentUser, "patients", "view")
     ? safeOptionalData(() => api.patients(currentUser))
     : [];
+  const vitalsQueueOptions = action === "add-to-vitals-queue" ? (() => {
+    const today = localDateInputValue();
+    const appointments = safeOptionalData(() => api.appointments(currentUser), []).filter((item) => String(item.date || item.appointmentDate || item.createdAt || "").slice(0, 10) === today && (!currentUser.branchId || !item.branchId || String(item.branchId) === String(currentUser.branchId)));
+    const queue = safeOptionalData(() => api.queueTokens(currentUser), []);
+    const vitals = safeOptionalData(() => api.vitals(currentUser), []);
+    return appointments.filter((appointment, index, all) => appointment.patientId && all.findIndex((item) => String(item.patientId) === String(appointment.patientId)) === index && !queue.some((item) => String(item.patientId) === String(appointment.patientId) && !["Completed", "Cancelled"].includes(item.status)) && !vitals.some((item) => String(item.appointmentId || "") === String(appointment.id))).map((appointment) => ({ appointment, patient: patients.find((item) => String(item.id) === String(appointment.patientId)) })).filter((item) => item.patient);
+  })() : [];
   const appointmentLookup = action === "create-appointment" ? safeOptionalData(() => api.appointmentOptions(currentUser), { departments: [], doctors: [] }) : { departments: [], doctors: [] };
   const activePlans = currentUser.role === ROLES.SUPER_ADMIN ? safeOptionalData(() => api.subscriptions(currentUser)).filter((plan) => plan.status !== "Disabled") : [];
   const mainBranchExists = branches.some((branch) => (branch.branchType || "Main Branch") === "Main Branch");
@@ -11007,6 +11274,10 @@ function createForm(action) {
         return `<option value="${escapeHtml(branch.id)}">${escapeHtml(label)}</option>`;
       }).join("")}`
     : `<option value="">Create a branch first</option>`;
+  const staffDepartments = action === "create-staff"
+    ? safeOptionalData(() => api.masterDataItems(currentUser), []).filter((item) => item.type === "Department" && String(item.status || "Active").toLowerCase() === "active")
+    : [];
+  const staffRoleOptions = [["Doctor", "Doctor"], ["Nurse", "Nurse"], ["Reception User", "Receptionist"], ["Billing User", "Billing"], ["Lab User", "Lab"], ["Pharmacy User", "Pharmacy"], ["Radiology User", "Radiology"], ["Mortuary Officer", "Mortuary"]];
   const forms = {
     "review-opd-vitals": reviewedToken && reviewedVitals ? { title:"Review OPD Vitals", note:"Read-only Nurse-recorded vitals for this OPD encounter.", html:`<div class="notice subtle"><strong>${escapeHtml(reviewedPatient?.name || reviewedToken.patientName || "Unknown Patient")}</strong><br>${escapeHtml(reviewedPatient?.mrn || reviewedToken.mrn || "-")} · Token ${escapeHtml(reviewedToken.tokenNumber || "-")} · ${escapeHtml(reviewedToken.appointmentId || "-")} · ${escapeHtml(reviewedToken.department || "-")} · ${escapeHtml(reviewedToken.doctor || currentUser.name || "-")}</div><div class="mini-grid"><span><strong>${escapeHtml(reviewedVitals.temperature || "-")}</strong><small>Temperature</small></span><span><strong>${escapeHtml(reviewedVitals.bloodPressure || "-")}</strong><small>Blood Pressure</small></span><span><strong>${escapeHtml(reviewedVitals.pulse || "-")}</strong><small>Pulse</small></span><span><strong>${escapeHtml(reviewedVitals.respiratoryRate || "-")}</strong><small>Respiratory Rate</small></span><span><strong>${escapeHtml(reviewedVitals.spo2 || "-")}</strong><small>SpO2</small></span><span><strong>${escapeHtml(reviewedVitals.bloodSugar || "-")}</strong><small>Blood Sugar</small></span><span><strong>${escapeHtml(reviewedVitals.painScore || "-")}</strong><small>Pain Score</small></span><span><strong>${escapeHtml(reviewedVitals.recordedBy || "-")}</strong><small>Recorded By</small></span></div><div class="notice subtle">Symptoms: ${escapeHtml(reviewedVitals.symptoms || "-")}<br>Notes: ${escapeHtml(reviewedVitals.notes || "-")}<br>Recorded: ${escapeHtml(formatDateTime(reviewedVitals.recordedAt || reviewedVitals.createdAt))}</div>` } : null,
     "manage-admission": managedAdmission ? {
@@ -11021,31 +11292,39 @@ function createForm(action) {
       </form>`
     } : null,
     "create-hospital": {
-      title: "Hospital customer",
-      note: "Create the hospital group first. Admin login can be created from Admin Users.",
+      title: currentUser.role === ROLES.HOSPITAL_ADMIN ? "Create Hospital Profile" : "Hospital customer",
+      note: currentUser.role === ROLES.HOSPITAL_ADMIN ? "Create the parent hospital organization profile. Branches remain managed separately." : "Create the hospital group first. Admin login can be created from Admin Users.",
       html: `
-        <form class="form-grid compact-grid" data-action="create-hospital">
-          <label>Hospital name<input name="name" required placeholder="Metro Health Group" /></label>
-          <label>Owner name<input name="owner" required placeholder="Owner or CEO" /></label>
-          <label class="span-2">Plan<select name="plan">${activePlans.length ? activePlans.map((plan) => `<option value="${escapeAttribute(plan.name)}">${escapeHtml(plan.name)} — ${escapeHtml(plan.branches ?? 0)} branches · ${escapeHtml(plan.users ?? 0)} users · ${escapeHtml(plan.storageGb ?? 0)} GB storage</option>`).join("") : `<option>Growth</option>`}</select></label>
-          <div class="notice subtle span-2">Branch limit, user limit, and storage limit are set from the selected plan. Manage plan limits from Subscriptions.</div>
-          <button class="button primary" type="submit" data-testid="modal-submit-button">Create hospital</button>
+        <form class="form-grid compact-grid hospital-profile-form" data-action="create-hospital" novalidate>
+          ${currentUser.role === ROLES.HOSPITAL_ADMIN ? `<h4 class="form-section-title span-2">Hospital Information</h4><label>Hospital Name*<input name="name" required value="Janatha Hospitals" /></label><label>Hospital Code*<input name="hospitalCode" required value="JANATHA" /></label><label>Hospital Type<select name="hospitalType"><option>Multi-Speciality Hospital</option><option>General Hospital</option><option>Specialty Hospital</option><option>Clinic</option><option>Other</option></select></label><label>Registration Number<input name="registrationNumber" /></label>
+          <h4 class="form-section-title span-2">Address</h4><label class="span-2">Address Line*<input name="address" required /></label><label>City*<input name="city" required /></label><label>State*<input name="state" required /></label><label>PIN Code*<input name="pinCode" required pattern="[0-9]{6}" maxlength="6" /></label>
+          <h4 class="form-section-title span-2">Contact Information</h4><label>Contact Number*<input name="contactNumber" required /></label><label>Email*<input name="email" type="email" required /></label><label>Website<input name="website" type="url" placeholder="https://janathahospitals.com" /></label>
+          <h4 class="form-section-title span-2">Hospital Logo</h4><label class="span-2">Upload Hospital Logo<input name="logoFile" type="file" accept="image/png,image/jpeg,image/webp" data-hospital-logo-input /></label><input type="hidden" name="logoDataUrl" data-hospital-logo-value /><div class="hospital-logo-preview span-2" data-hospital-logo-preview><small>Logo preview</small></div>
+          <label>Status*<select name="status" required><option selected>Active</option><option>Inactive</option></select></label><div class="button-row span-2 footer-actions"><button class="button ghost" type="button" data-action="close-create">Cancel</button><button class="button primary" type="submit" data-testid="modal-submit-button">Save Hospital Profile</button></div>` : `<label>Hospital name<input name="name" required placeholder="Metro Health Group" /></label><label>Owner name<input name="owner" required placeholder="Owner or CEO" /></label><label class="span-2">Plan<select name="plan">${activePlans.length ? activePlans.map((plan) => `<option value="${escapeAttribute(plan.name)}">${escapeHtml(plan.name)} — ${escapeHtml(plan.branches ?? 0)} branches · ${escapeHtml(plan.users ?? 0)} users · ${escapeHtml(plan.storageGb ?? 0)} GB storage</option>`).join("") : `<option>Growth</option>`}</select></label><div class="notice subtle span-2">Branch limit, user limit, and storage limit are set from the selected plan. Manage plan limits from Subscriptions.</div><button class="button primary" type="submit" data-testid="modal-submit-button">Create hospital</button>`}
         </form>`
     },
     "create-branch": {
-      title: "Hospital branch",
-      note: "One Main Branch is allowed. Extra locations become Sub Branches.",
+      title: "Add Branch",
+      note: "Create a hospital location. A Branch Admin can be assigned separately after saving.",
       html: `
-        <form class="form-grid compact-grid" data-action="create-branch">
-          <label>Branch name<input name="name" required placeholder="Main Branch" /></label>
-          <label>Branch type<select name="branchType">
-            <option ${mainBranchExists ? "disabled" : "selected"}>Main Branch</option>
-            <option ${mainBranchExists ? "selected" : ""}>Sub Branch</option>
-          </select></label>
-          <label>City<input name="city" required placeholder="Mumbai" /></label>
-          <label>Beds<input name="beds" type="number" value="80" /></label>
-          <label>Rooms<input name="rooms" type="number" value="45" /></label>
-          <button class="button primary" type="submit" data-testid="modal-submit-button">Create branch</button>
+        <form class="form-grid compact-grid branch-form" data-action="create-branch" novalidate>
+          <h4 class="form-section-title span-2">Basic Information</h4>
+          <label>Branch Name*<input name="name" required placeholder="Hyderabad Branch" /></label>
+          <label>Branch Code*<input name="branchCode" required placeholder="HYD001" autocomplete="off" /></label>
+          <label>Status*<select name="status" required><option selected>Active</option><option>Inactive</option></select></label>
+          <input type="hidden" name="branchType" value="${mainBranchExists ? "Sub Branch" : "Main Branch"}" />
+          <h4 class="form-section-title span-2">Address</h4>
+          <label class="span-2">Address Line<input name="address" placeholder="Street and area" /></label>
+          <label>City*<input name="city" required placeholder="Hyderabad" /></label>
+          <label>State*<input name="state" required placeholder="Telangana" /></label>
+          <label>PIN Code*<input name="pinCode" required inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="500001" /></label>
+          <h4 class="form-section-title span-2">Contact Information</h4>
+          <label>Contact Number*<input name="contactNumber" required inputmode="tel" pattern="[0-9+() -]{7,15}" placeholder="9876543210" /></label>
+          <label>Email<input name="email" type="email" placeholder="branch@hospital.com" /></label>
+          <h4 class="form-section-title span-2">Working Hours</h4>
+          <label>Opening Time<input name="openingTime" type="time" /></label>
+          <label>Closing Time<input name="closingTime" type="time" /></label>
+          <div class="button-row span-2 footer-actions"><button class="button ghost" type="button" data-action="close-create">Cancel</button><button class="button primary" type="submit" data-testid="modal-submit-button">Save Branch</button></div>
         </form>`
     },
     "create-ward": {
@@ -11075,6 +11354,21 @@ function createForm(action) {
           <button class="button primary" type="submit" data-testid="modal-submit-button">Create bed</button>
         </form>`
     },
+    "create-staff": currentUser.role === ROLES.HOSPITAL_ADMIN ? {
+      title: "Add Staff",
+      note: "Create an employee login and assign it to an existing branch and department.",
+      html: `<form class="form-grid compact-grid staff-form" data-action="create-staff" novalidate>
+        <label>Full Name*<input name="name" required placeholder="Asha Kumar" /></label><label>Employee ID*<input name="employeeId" required placeholder="EMP001" /></label>
+        <label>Email*<input name="contactEmail" type="email" required placeholder="asha@hospital.com" /></label><label>Mobile Number*<input name="mobile" required inputmode="tel" placeholder="9876543210" /></label>
+        <label>Username / Login*<input name="email" required autocomplete="username" placeholder="asha-login" /></label>${passwordField({ label: "Password", name: "password", minlength: 8, autocomplete: "new-password" })}
+        ${passwordField({ label: "Confirm Password", name: "confirmPassword", minlength: 8, autocomplete: "new-password" })}
+        <label>Role*<select name="jobRole" required><option value="">Select role</option>${staffRoleOptions.map(([value, label]) => `<option value="${escapeAttribute(value)}">${escapeHtml(label)}</option>`).join("")}</select></label>
+        <label>Branch*<select name="branchId" required data-staff-branch><option value="">Select branch</option>${branches.filter((branch) => String(branch.status || "Active").toLowerCase() === "active").map((branch) => `<option value="${escapeAttribute(branch.id)}">${escapeHtml(branch.name)}</option>`).join("")}</select></label>
+        <label>Department*<select name="department" required data-staff-department><option value="">Select branch first</option>${staffDepartments.map((department) => `<option value="${escapeAttribute(department.name)}" data-branch-id="${escapeAttribute(department.branchId || "all")}" hidden>${escapeHtml(department.name)}</option>`).join("")}</select></label>
+        <label>Status*<select name="status" required><option selected>Active</option><option>Inactive</option></select></label>
+        <input type="hidden" name="role" value="${ROLES.BRANCH_USER}" /><div class="button-row span-2 footer-actions"><button class="button ghost" type="button" data-action="close-create">Cancel</button><button class="button primary" type="submit">Create Login</button></div>
+      </form>`
+    } : null,
     "create-user": {
       title: currentUser.role === ROLES.SUPER_ADMIN ? "Hospital admin login" : currentUser.role === ROLES.HOSPITAL_ADMIN ? "Branch admin login" : "Branch staff login",
       note: currentUser.role === ROLES.BRANCH_ADMIN
@@ -11278,12 +11572,22 @@ function createForm(action) {
           <button class="button primary" type="submit" data-testid="modal-submit-button">Register patient</button>
         </form>`
     },
+    "add-to-vitals-queue": {
+      title: "Add Patient to Vitals Queue",
+      note: "Select an eligible active OPD patient from today. This does not create a patient record.",
+      html: `<form class="form-grid compact-grid" data-action="add-to-vitals-queue">
+        <label class="span-2">Search Patient<input type="search" data-vitals-patient-search placeholder="Search name, MRN / UHID or mobile" /></label>
+        <label class="span-2">Eligible Patient<select name="appointmentId" required data-vitals-patient-select><option value="">Select patient</option>${vitalsQueueOptions.map(({ patient, appointment }) => `<option value="${escapeHtml(appointment.id)}" data-search="${escapeAttribute([patient.name, patient.fullName, patient.mrn, patient.uhid, patient.mobile, patient.mobileNumber].filter(Boolean).join(" ").toLowerCase())}">${escapeHtml(`${patient.name || patient.fullName || "Patient"} · ${patient.mrn || patient.uhid || patient.id} · ${appointment.department || "OPD"}`)}</option>`).join("")}</select></label>
+        ${vitalsQueueOptions.length ? "" : `<p class="compact-empty span-2">No eligible OPD patients are available.</p>`}
+        <button class="button primary span-2" type="submit" ${vitalsQueueOptions.length ? "" : "disabled"}>Add to Vitals Queue</button>
+      </form>`
+    },
     "generate-bill": {
       title: "Generate Bill",
       note: "Create a draft bill from consultation, lab, pharmacy, and procedure charges. Payment is collected only by authorized billing staff.",
       html: `
         <form class="form-grid compact-grid" data-action="generate-bill">
-          <label>Patient<select name="patientId" required><option value="">Select patient</option>${patients.map((patient) => `<option value="${patient.id}">${escapeHtml(patientLabel(patient))}</option>`).join("")}</select></label>
+          <label class="span-2">Find patient (name, ID, UHID or mobile)<select name="patientId" required><option value="">Select existing patient</option>${patients.map((patient) => `<option value="${patient.id}">${escapeHtml(`${patient.name || patient.fullName || "Patient"} · ${patient.mrn || patient.uhid || patient.id} · ${patient.mobile || patient.mobileNumber || "No mobile"}`)}</option>`).join("")}</select></label>
           <label>Visit / Appointment<input name="appointmentId" placeholder="Appointment or visit number" /></label>
           <label>Department<input name="department" placeholder="General" data-testid="form-department" /></label>
           <label>Doctor<input name="doctor" placeholder="Duty Doctor" data-testid="form-doctor" /></label>
@@ -11298,12 +11602,14 @@ function createForm(action) {
           <label>Emergency charges<input name="emergencyCharges" type="number" min="0" value="0" /></label>
           <label>Discount<input name="discount" type="number" min="0" value="0" /></label>
           <label>Tax<input name="tax" type="number" min="0" value="0" /></label>
+          <label>Previous / advance amount<input name="advanceAmount" type="number" min="0" value="0" /></label>
+          <label>Amount paid now<input name="amountPaid" type="number" min="0" value="0" /></label>
           <label>Total amount<input name="totalPreview" type="number" min="0" placeholder="Auto-calculated after save" disabled /></label>
           <label>Override price<select name="overridePrice"><option>No</option><option>Yes</option></select></label>
           <label class="span-2">Override reason<input name="overrideReason" placeholder="Required when overriding configured price" /></label>
-          <label>Payment mode<select name="paymentType" data-testid="form-payment-mode"><option>Cash</option><option>Card</option><option>UPI</option><option>Insurance</option><option>Corporate</option><option>Credit</option><option>Package</option></select></label>
+          <label>Payment mode<select name="paymentType" data-testid="form-payment-mode"><option>Cash</option><option>Card</option><option>UPI</option><option>Bank Transfer</option><option>Insurance</option><option>Split Payment</option></select></label>
           <label>Mark as paid<select name="markPaid"><option>No</option><option>Yes</option></select></label>
-          <label class="span-2">Billing items<textarea name="billingItems" placeholder="One item per line"></textarea></label>
+          <label class="span-2">Additional itemized services (optional JSON)<textarea name="billingItems" placeholder='[{"service":"Procedure","qty":1,"rate":1500,"discount":0,"tax":0}]'></textarea></label>
           <label class="span-2">Notes<textarea name="notes" placeholder="Optional billing note"></textarea></label>
           <button class="button primary" type="submit" data-testid="modal-submit-button">Generate draft bill</button>
         </form>`
@@ -11444,6 +11750,62 @@ function editModal() {
   if (!editTarget) return "";
   const record = collectionRows(editTarget.collection).find((item) => item.id === editTarget.id);
   if (!record) return "";
+  if (editTarget.collection === "hospitals" && editTarget.hospitalProfile) {
+    const types = ["Multi-Speciality Hospital", "General Hospital", "Specialty Hospital", "Clinic", "Other"];
+    return `<div class="modal-backdrop"><section class="modal-card" role="dialog" aria-modal="true"><div class="panel-head"><div><p class="eyebrow">Hospital Profile</p><h3>Edit Profile</h3></div><button class="icon-button" type="button" data-action="close-edit">Close</button></div>
+      <form class="form-grid compact-grid hospital-profile-form" data-action="save-edit" data-collection="hospitals" data-id="${escapeHtml(record.id)}" novalidate>
+        <label>Hospital Name*<input name="name" required value="${escapeAttribute(record.name || "")}" /></label><label>Hospital Code*<input name="hospitalCode" required value="${escapeAttribute(record.hospitalCode || record.code || "")}" /></label>
+        <label>Hospital Type<select name="hospitalType">${types.map((type) => `<option ${record.hospitalType === type ? "selected" : ""}>${type}</option>`).join("")}</select></label><label>Registration Number<input name="registrationNumber" value="${escapeAttribute(record.registrationNumber || "")}" /></label>
+        <label class="span-2">Address Line*<input name="address" required value="${escapeAttribute(record.address || "")}" /></label><label>City*<input name="city" required value="${escapeAttribute(record.city || "")}" /></label><label>State*<input name="state" required value="${escapeAttribute(record.state || "")}" /></label><label>PIN Code*<input name="pinCode" required pattern="[0-9]{6}" maxlength="6" value="${escapeAttribute(record.pinCode || "")}" /></label>
+        <label>Contact Number*<input name="contactNumber" required value="${escapeAttribute(record.contactNumber || record.contact || "")}" /></label><label>Email*<input name="email" type="email" required value="${escapeAttribute(record.email || "")}" /></label><label>Website<input name="website" type="url" value="${escapeAttribute(record.website || "")}" /></label>
+        <label class="span-2">Upload Hospital Logo<input name="logoFile" type="file" accept="image/png,image/jpeg,image/webp" data-hospital-logo-input /></label><input type="hidden" name="logoDataUrl" value="${escapeAttribute(record.logoDataUrl || "")}" data-hospital-logo-value /><div class="hospital-logo-preview span-2" data-hospital-logo-preview>${record.logoDataUrl ? `<img src="${escapeAttribute(record.logoDataUrl)}" alt="Hospital logo preview" />` : `<small>Logo preview</small>`}</div>
+        <label>Status*<select name="status"><option ${record.status !== "Inactive" ? "selected" : ""}>Active</option><option ${record.status === "Inactive" ? "selected" : ""}>Inactive</option></select></label><div class="button-row span-2 footer-actions"><button class="button ghost" type="button" data-action="close-edit">Cancel</button><button class="button primary" type="submit">Save Hospital Profile</button></div>
+      </form></section></div>`;
+  }
+  if (editTarget.collection === "users" && editTarget.staffOnly) {
+    const branches = safeOptionalData(() => api.branches(currentUser), []);
+    const departments = safeOptionalData(() => api.masterDataItems(currentUser), []).filter((item) => item.type === "Department" && String(item.status || "Active").toLowerCase() === "active");
+    const roles = [["Doctor", "Doctor"], ["Nurse", "Nurse"], ["Reception User", "Receptionist"], ["Billing User", "Billing"], ["Lab User", "Lab"], ["Pharmacy User", "Pharmacy"], ["Radiology User", "Radiology"], ["Mortuary Officer", "Mortuary"]];
+    return `<div class="modal-backdrop"><section class="modal-card" role="dialog" aria-modal="true"><div class="panel-head"><div><p class="eyebrow">Edit Staff</p><h3>${escapeHtml(record.name)}</h3></div><button class="icon-button" type="button" data-action="close-edit">Close</button></div>
+      <form class="form-grid compact-grid staff-form" data-action="save-edit" data-collection="users" data-id="${escapeHtml(record.id)}" novalidate>
+        <label>Full Name*<input name="name" required value="${escapeAttribute(record.name || "")}" /></label><label>Employee ID*<input name="employeeId" required value="${escapeAttribute(record.employeeId || "")}" /></label>
+        <label>Email*<input name="contactEmail" type="email" required value="${escapeAttribute(record.contactEmail || "")}" /></label><label>Mobile Number*<input name="mobile" required value="${escapeAttribute(record.mobile || "")}" /></label><label>Username / Login<input value="${escapeAttribute(record.email || "")}" readonly /></label>
+        <label>Role*<select name="jobRole" required>${roles.map(([value, label]) => `<option value="${escapeAttribute(value)}" ${record.jobRole === value ? "selected" : ""}>${escapeHtml(label)}</option>`).join("")}</select></label>
+        <label>Branch*<select name="branchId" required data-staff-branch>${branches.map((branch) => `<option value="${escapeAttribute(branch.id)}" ${String(record.branchId) === String(branch.id) ? "selected" : ""}>${escapeHtml(branch.name)}</option>`).join("")}</select></label>
+        <label>Department*<select name="department" required data-staff-department>${departments.map((department) => `<option value="${escapeAttribute(department.name)}" data-branch-id="${escapeAttribute(department.branchId || "all")}" ${record.department === department.name ? "selected" : ""}>${escapeHtml(department.name)}</option>`).join("")}</select></label>
+        <label>Status*<select name="status"><option ${record.status !== "Inactive" ? "selected" : ""}>Active</option><option ${record.status === "Inactive" ? "selected" : ""}>Inactive</option></select></label>
+        <div class="button-row span-2 footer-actions"><button class="button ghost" type="button" data-action="close-edit">Cancel</button><button class="button primary" type="submit">Save Changes</button></div>
+      </form></section></div>`;
+  }
+  if (editTarget.collection === "branches" && editTarget.viewOnly) {
+    const branchId = String(record.id);
+    const inBranch = (item) => String(item.branchId || "") === branchId;
+    const users = safeOptionalData(() => api.users(currentUser), []);
+    const branchAdmin = users.find((user) => inBranch(user) && [ROLES.BRANCH_ADMIN, "BRANCH_ADMIN"].includes(user.role));
+    const appointments = safeOptionalData(() => api.appointments(currentUser), []).filter((item) => inBranch(item) && isToday(item.date || item.appointmentDate || item.createdAt));
+    const admissions = safeOptionalData(() => api.admissions(currentUser), []).filter((item) => inBranch(item) && !["Discharged", "Cancelled"].includes(item.status || item.admissionStatus));
+    const beds = safeOptionalData(() => api.beds(currentUser), []).filter(inBranch);
+    const bills = safeOptionalData(() => api.bills(currentUser), []).filter((item) => inBranch(item) && isToday(item.createdAt || item.date));
+    const patientsToday = new Set(appointments.map((item) => item.patientId).filter(Boolean)).size;
+    const revenue = bills.reduce((sum, bill) => sum + billPaidAmount(bill), 0);
+    const shortcuts = [["Branch Admin", "users"], ["Departments", "masterData"], ["Staff", "staffRoster"], ["Wards & Beds", "wards"], ["Billing", "billing"], ["Reports", "reports"]];
+    return `<div class="modal-backdrop"><section class="modal-card branch-overview-modal" role="dialog" aria-modal="true">
+      <div class="panel-head"><div><p class="eyebrow">Branch Overview</p><h3>${escapeHtml(record.name)}</h3><p>${escapeHtml(record.branchCode || record.code || "-")} · ${escapeHtml([record.city, record.state].filter(Boolean).join(", ") || "Location unavailable")}</p></div><button class="icon-button" type="button" data-action="close-edit">Close</button></div>
+      <div class="branch-detail-grid"><span><small>Address</small><strong>${escapeHtml(record.address || "-")}</strong></span><span><small>Contact</small><strong>${escapeHtml(record.contactNumber || record.contact || record.phone || "-")}</strong></span><span><small>Email</small><strong>${escapeHtml(record.email || "-")}</strong></span><span><small>Status</small>${badge(record.status || "Active", statusClass(record.status || "Active"))}</span><span><small>Branch Admin</small><strong>${escapeHtml(branchAdmin?.name || "Not Assigned")}</strong></span><span><small>Working Hours</small><strong>${escapeHtml(record.openingTime && record.closingTime ? `${record.openingTime} – ${record.closingTime}` : "-")}</strong></span></div>
+      <div class="branch-stat-grid">${[["Patients Today", patientsToday], ["Today's Appointments", appointments.length], ["Current Admissions", admissions.length], ["Total Beds", beds.length], ["Available Beds", beds.filter((bed) => String(bed.status || "Available").toLowerCase() === "available").length], ["Staff Count", users.filter((user) => inBranch(user) && user.role !== ROLES.BRANCH_ADMIN).length], ["Today's Revenue", money(revenue)]].map(([label, value]) => `<span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(label)}</small></span>`).join("")}</div>
+      <div class="branch-shortcuts">${shortcuts.map(([label, route]) => `<button class="button soft" type="button" data-route="${route}" data-branch-id="${escapeHtml(record.id)}">${label}</button>`).join("")}</div>
+    </section></div>`;
+  }
+  if (editTarget.collection === "branches") {
+    return `<div class="modal-backdrop"><section class="modal-card" role="dialog" aria-modal="true"><div class="panel-head"><div><p class="eyebrow">Edit Branch</p><h3>${escapeHtml(record.name)}</h3></div><button class="icon-button" type="button" data-action="close-edit">Close</button></div>
+      <form class="form-grid compact-grid branch-form" data-action="save-edit" data-collection="branches" data-id="${escapeHtml(record.id)}" novalidate>
+        <label>Branch Name*<input name="name" required value="${escapeAttribute(record.name || "")}" /></label><label>Branch Code<input value="${escapeAttribute(record.branchCode || record.code || "-")}" readonly /></label>
+        <label class="span-2">Address Line<input name="address" value="${escapeAttribute(record.address || "")}" /></label><label>City*<input name="city" required value="${escapeAttribute(record.city || "")}" /></label><label>State*<input name="state" required value="${escapeAttribute(record.state || "")}" /></label>
+        <label>PIN Code*<input name="pinCode" required pattern="[0-9]{6}" maxlength="6" value="${escapeAttribute(record.pinCode || record.pin || "")}" /></label><label>Contact Number*<input name="contactNumber" required value="${escapeAttribute(record.contactNumber || record.contact || record.phone || "")}" /></label><label>Email<input name="email" type="email" value="${escapeAttribute(record.email || "")}" /></label>
+        <label>Opening Time<input name="openingTime" type="time" value="${escapeAttribute(record.openingTime || "")}" /></label><label>Closing Time<input name="closingTime" type="time" value="${escapeAttribute(record.closingTime || "")}" /></label><label>Status*<select name="status"><option ${record.status !== "Inactive" ? "selected" : ""}>Active</option><option ${record.status === "Inactive" ? "selected" : ""}>Inactive</option></select></label>
+        <div class="button-row span-2 footer-actions"><button class="button ghost" type="button" data-action="close-edit">Cancel</button><button class="button primary" type="submit">Save Changes</button></div>
+      </form></section></div>`;
+  }
   const fields = editableEntries(record, editTarget.collection);
   return `
     <div class="modal-backdrop">
@@ -11989,6 +12351,7 @@ document.addEventListener("submit", async (event) => {
     if (action === "login") {
       await api.login(values.loginIdentifier || values.email, values.password);
       currentUser = api.currentUser();
+      if (currentUser?.role === ROLES.HOSPITAL_ADMIN) hospitalAdminBranchId = "all";
       setPage("dashboard");
       render();
       setTimeout(warmDataCache, 60);
@@ -12040,15 +12403,42 @@ document.addEventListener("submit", async (event) => {
       setPage("login");
     }
     if (action === "create-hospital") {
+      if (currentUser.role === ROLES.HOSPITAL_ADMIN) {
+        if (safeOptionalData(() => api.hospitals(currentUser), []).length) throw new Error("A hospital profile already exists. Use Edit Profile.");
+        if (!form.checkValidity()) { form.reportValidity(); return; }
+        values.hospitalCode = String(values.hospitalCode || "").trim().toUpperCase();
+      }
       await api.createHospital(currentUser, values);
       createTarget = null;
-      toast("Hospital customer created.");
+      toast(currentUser.role === ROLES.HOSPITAL_ADMIN ? "Hospital profile created successfully." : "Hospital customer created.");
       render();
     }
     if (action === "create-branch") {
-      await api.createBranch(currentUser, values);
+      const required = ["name", "branchCode", "city", "state", "pinCode", "contactNumber", "status"];
+      for (const name of required) {
+        const field = form.elements.namedItem(name);
+        if (!String(values[name] || "").trim()) field?.setCustomValidity(`${field?.closest("label")?.childNodes?.[0]?.textContent?.replace("*", "").trim() || "This field"} is required.`);
+      }
+      if (!form.checkValidity()) { form.reportValidity(); return; }
+      values.branchCode = String(values.branchCode).trim().toUpperCase();
+      const existingBranches = safeOptionalData(() => api.branches(currentUser), []);
+      const duplicateCode = existingBranches.some((branch) => String(branch.branchCode || branch.code || "").trim().toUpperCase() === values.branchCode);
+      if (duplicateCode) {
+        const codeField = form.elements.namedItem("branchCode");
+        codeField?.setCustomValidity("Branch code already exists.");
+        codeField?.reportValidity();
+        return;
+      }
+      const duplicateLocation = existingBranches.some((branch) => String(branch.name || "").trim().toLowerCase() === String(values.name).trim().toLowerCase() && String(branch.city || "").trim().toLowerCase() === String(values.city).trim().toLowerCase());
+      if (duplicateLocation) {
+        const nameField = form.elements.namedItem("name");
+        nameField?.setCustomValidity("A branch with this name and city already exists.");
+        nameField?.reportValidity();
+        return;
+      }
+      await api.createBranch(currentUser, { ...values, hospitalId: currentUser.hospitalId });
       createTarget = null;
-      toast("Branch created.");
+      toast("Branch created successfully.");
       render();
     }
     if (action === "create-ward") {
@@ -12061,6 +12451,26 @@ document.addEventListener("submit", async (event) => {
       await api.createBed(currentUser, values);
       createTarget = null;
       toast("Bed created.");
+      render();
+    }
+    if (action === "create-staff") {
+      if (currentUser.role !== ROLES.HOSPITAL_ADMIN || !hasPermission(currentUser, "staffRoster", "create")) throw new Error("You do not have permission to create staff accounts.");
+      if (!form.checkValidity()) { form.reportValidity(); return; }
+      if (values.password !== values.confirmPassword) {
+        const confirm = form.elements.namedItem("confirmPassword");
+        confirm?.setCustomValidity("Passwords do not match.");
+        confirm?.reportValidity();
+        return;
+      }
+      const existingUsers = safeOptionalData(() => api.users(currentUser), []);
+      if (existingUsers.some((user) => String(user.email || "").toLowerCase() === String(values.email).trim().toLowerCase())) throw new Error("Username / login already exists.");
+      if (existingUsers.some((user) => String(user.employeeId || "").toLowerCase() === String(values.employeeId).trim().toLowerCase())) throw new Error("Employee ID already exists.");
+      const allowedPages = USER_ROLE_PRESETS[values.jobRole] || (values.jobRole === "Mortuary Officer" ? ["dashboard", "mortuary", "mortuary-register", "mortuary-storage", "mortuary-certificates", "mortuary-release", "mortuary-search"] : ["dashboard"]);
+      const allowedModules = USER_ROLE_MODULES[values.jobRole] || (values.jobRole === "Mortuary Officer" ? ["Mortuary"] : []);
+      delete values.confirmPassword;
+      await api.createUser(currentUser, { ...values, role: ROLES.BRANCH_USER, hospitalId: currentUser.hospitalId, allowedPages, allowedModules, mustChangePassword: true });
+      createTarget = null;
+      toast("Staff login created successfully.");
       render();
     }
     if (action === "create-user") {
@@ -12408,9 +12818,17 @@ document.addEventListener("submit", async (event) => {
       render();
     }
     if (action === "save-edit") {
-      await api.updateRecord(currentUser, form.dataset.collection, form.dataset.id, normalizeEditValues(form.dataset.collection, values));
+      if (!form.checkValidity()) { form.reportValidity(); return; }
+      const staffEdit = form.dataset.collection === "users" && editTarget?.staffOnly;
+      const hospitalProfileEdit = form.dataset.collection === "hospitals" && editTarget?.hospitalProfile;
+      const changes = normalizeEditValues(form.dataset.collection, values);
+      if (staffEdit) {
+        changes.allowedPages = USER_ROLE_PRESETS[changes.jobRole] || (changes.jobRole === "Mortuary Officer" ? ["dashboard", "mortuary", "mortuary-register", "mortuary-storage", "mortuary-certificates", "mortuary-release", "mortuary-search"] : ["dashboard"]);
+        changes.allowedModules = USER_ROLE_MODULES[changes.jobRole] || (changes.jobRole === "Mortuary Officer" ? ["Mortuary"] : []);
+      }
+      await api.updateRecord(currentUser, form.dataset.collection, form.dataset.id, changes);
       editTarget = null;
-      toast("Record updated.");
+      toast(hospitalProfileEdit ? "Hospital profile updated successfully." : form.dataset.collection === "branches" ? "Branch updated successfully." : staffEdit ? "Staff updated successfully." : "Record updated.");
       render();
     }
     if (action === "upload-records") {
@@ -12437,10 +12855,30 @@ document.addEventListener("submit", async (event) => {
         if (ageNum < 0 || ageNum > 130) throw new Error("Age must be between 0 and 130.");
       }
 
+      if (values.enrollAction === "send-to-vitals") {
+        if (!values.department?.trim()) throw new Error("Department is required to send the patient to vitals.");
+        if (!values.doctor?.trim()) throw new Error("Doctor is required to send the patient to vitals.");
+      }
       // Call API
       const patient = await api.registerPatient(currentUser, values);
+      if (values.enrollAction === "send-to-vitals") {
+        await api.sendToVitals(currentUser, { patientId: patient.id, department: values.department, doctor: values.doctor, visitType: "Walk-in" });
+      }
       // Set success message and re-render
-      receptionEnrollMessage = `Patient enrolled successfully. MRN: ${patient.mrn || "Generated"}`;
+      receptionEnrollMessage = values.enrollAction === "send-to-vitals" ? `Patient enrolled and sent to OPD Vitals. MRN: ${patient.mrn || "Generated"}` : `Patient enrolled successfully. MRN: ${patient.mrn || "Generated"}`;
+      render();
+    }
+    if (action === "reception-existing-send-to-vitals") {
+      await api.sendToVitals(currentUser, { patientId: values.patientId, department: values.department, doctor: values.doctor, visitType: "OPD" });
+      receptionEnrollMessage = "Existing patient sent to OPD Vitals Queue.";
+      render();
+    }
+    if (action === "add-to-vitals-queue") {
+      const appointment = safeOptionalData(() => api.appointments(currentUser), []).find((item) => String(item.id) === String(values.appointmentId));
+      if (!appointment) throw new Error("Please select an eligible OPD patient.");
+      await api.sendToVitals(currentUser, { patientId: appointment.patientId, appointmentId: appointment.id });
+      createTarget = null;
+      toast("Patient added to OPD Vitals Queue.");
       render();
     }
     // ===== NEW: reception create admission =====
@@ -12491,9 +12929,9 @@ function emptyStateCreateAction(page) {
   const map = {
     dashboard: "register-patient", appointments: "create-appointment", patients: "register-patient", queue: "create-appointment",
     admissions: "create-admission", billing: "generate-bill", finance: "generate-bill", stock: "add-stock", inventory: "add-stock", "stock-logic": "add-stock",
-    purchase: "create-purchase-request", doctorSchedule: "create-doctor-schedule", staffRoster: "create-staff-roster", emergency: "create-emergency",
+    purchase: "create-purchase-request", doctorSchedule: "create-doctor-schedule", staffRoster: "create-staff", emergency: "create-emergency",
     ot: "schedule-surgery", radiology: "order-radiology", mortuary: "register-death", permissionTemplates: "create-permission-template",
-    masterData: "create-master-data", subscriptions: "create-subscription", offers: "create-offer", tasks: "create-task", followups: "book-followup",
+    hospitals: "create-hospital", branches: "create-branch", users: "create-user", masterData: "create-master-data", subscriptions: "create-subscription", offers: "create-offer", tasks: "create-task", followups: "book-followup",
     vitals: "record-vitals", ipdVitals: "record-ipd-vitals", dailySheets: "add-daily-sheet", dutyDoctor: "add-duty-note", nursing: "add-nursing-note",
     intakeOutput: "add-intake-output", handover: "add-handover-note", documents: "upload-document", feedback: "submit-feedback",
     "lab-samples": "create-master-data", "lab-processing": "create-master-data", "lab-results": "create-master-data",
@@ -12551,13 +12989,14 @@ document.addEventListener("click", async (event) => {
   if (delegatedTarget.dataset.route) {
     const patientId = delegatedTarget.dataset.patientId;
     const admissionId = delegatedTarget.dataset.admissionId;
+    const branchId = delegatedTarget.dataset.branchId;
     const tab = delegatedTarget.dataset.tab;
     if (delegatedTarget.dataset.notification && hasPermission(currentUser, "notifications", "edit")) {
       await api.markNotificationRead(currentUser, delegatedTarget.dataset.notification).catch(() => null);
     }
     if (patientId) selectedPatientId = patientId;
     notificationsDrawerOpen = false;
-    setPage(delegatedTarget.dataset.route, { patientId, admissionId, tab });
+    setPage(delegatedTarget.dataset.route, { patientId, admissionId, branchId, tab });
     return;
   }
 
@@ -12895,6 +13334,43 @@ document.addEventListener("click", async (event) => {
       editTarget = { collection: target.dataset.collection, id: target.dataset.id };
       render();
     }
+    if (action === "edit-hospital-profile") {
+      editTarget = { collection: "hospitals", id: target.dataset.id, hospitalProfile: true };
+      render();
+    }
+    if (action === "edit-staff") {
+      editTarget = { collection: "users", id: target.dataset.id, staffOnly: true };
+      render();
+    }
+    if (action === "toggle-staff-status") {
+      if (currentUser.role !== ROLES.HOSPITAL_ADMIN || !hasPermission(currentUser, "staffRoster", "edit")) throw new Error("You do not have permission to change staff status.");
+      const nextStatus = String(target.dataset.status || "Active").toLowerCase() === "active" ? "Inactive" : "Active";
+      await api.updateRecord(currentUser, "users", target.dataset.id, { status: nextStatus });
+      toast(`Staff account ${nextStatus === "Active" ? "activated" : "deactivated"} successfully.`);
+      render();
+    }
+    if (action === "reset-staff-password") {
+      if (currentUser.role !== ROLES.HOSPITAL_ADMIN || !hasPermission(currentUser, "staffRoster", "edit")) throw new Error("You do not have permission to reset staff passwords.");
+      const password = window.prompt("Enter a new temporary password (minimum 8 characters):");
+      if (password === null) return;
+      if (password.length < 8) { toast("Temporary password must contain at least 8 characters.", "error"); return; }
+      const confirmation = window.prompt("Confirm the new temporary password:");
+      if (password !== confirmation) { toast("Passwords do not match.", "error"); return; }
+      await api.updateRecord(currentUser, "users", target.dataset.id, { password, mustChangePassword: true });
+      toast("Staff password reset successfully. The employee must change it at next login.");
+      render();
+    }
+    if (action === "view-branch") {
+      editTarget = { collection: "branches", id: target.dataset.id, viewOnly: true };
+      render();
+    }
+    if (action === "toggle-branch-status") {
+      if (currentUser.role !== ROLES.HOSPITAL_ADMIN || !hasPermission(currentUser, "branches", "edit")) throw new Error("You do not have permission to change branch status.");
+      const nextStatus = String(target.dataset.status || "Active").toLowerCase() === "active" ? "Inactive" : "Active";
+      await api.updateRecord(currentUser, "branches", target.dataset.id, { status: nextStatus });
+      toast(`Branch ${nextStatus === "Active" ? "activated" : "deactivated"} successfully.`);
+      render();
+    }
     if (action === "close-edit") {
       editTarget = null;
       render();
@@ -12930,6 +13406,7 @@ document.addEventListener("click", async (event) => {
     if (action === "logout") {
       await api.logout(currentUser);
       currentUser = null;
+      hospitalAdminBranchId = "all";
       selectedPatientId = null;
       globalSearchQuery = "";
       globalSearchSuggestions = [];
@@ -12976,6 +13453,17 @@ document.addEventListener("click", async (event) => {
     if (action === "check-in") {
       const result = await api.checkInAppointment(currentUser, target.dataset.appointment);
       toast(result?.status === "Arrived" ? "Patient arrival confirmed. Check-In is now available." : `Patient checked in${result?.tokenNumber ? ` with token ${result.tokenNumber}` : ""}. Next action: Record Vitals or View Queue.`);
+      render();
+    }
+    if (action === "select-admin-branch") {
+      hospitalAdminBranchId = target.dataset.branchId || "all";
+      render();
+    }
+    if (action === "send-to-vitals") {
+      const appointment = safeOptionalData(() => api.appointments(currentUser), []).find((item) => String(item.id) === String(target.dataset.appointment));
+      if (!appointment) throw new Error("Appointment could not be found.");
+      await api.sendToVitals(currentUser, { patientId: appointment.patientId, appointmentId: appointment.id });
+      toast("Patient sent to OPD Vitals Queue.");
       render();
     }
     if (action === "lab-ready") {
@@ -13179,7 +13667,49 @@ document.addEventListener("click", async (event) => {
 });
 
 document.addEventListener("change", async (event) => {
+  if (event.target.matches?.("[data-hospital-logo-input]") && event.target.files?.[0]) {
+    const file = event.target.files[0];
+    if (!file.type.startsWith("image/")) { toast("Hospital logo must be an image file.", "error"); event.target.value = ""; return; }
+    if (file.size > 2 * 1024 * 1024) { toast("Hospital logo must be smaller than 2 MB.", "error"); event.target.value = ""; return; }
+    const dataUrl = await readFileAsDataUrl(file);
+    const form = event.target.closest(".hospital-profile-form");
+    const value = form?.querySelector("[data-hospital-logo-value]");
+    const preview = form?.querySelector("[data-hospital-logo-preview]");
+    if (value) value.value = dataUrl;
+    if (preview) preview.innerHTML = `<img src="${escapeAttribute(dataUrl)}" alt="Hospital logo preview" />`;
+    return;
+  }
+  if (event.target.matches?.("[data-staff-branch]")) {
+    const form = event.target.closest(".staff-form");
+    const department = form?.querySelector("[data-staff-department]");
+    const branchId = String(event.target.value || "");
+    if (department) {
+      department.value = "";
+      department.querySelectorAll("option[data-branch-id]").forEach((option) => {
+        option.hidden = Boolean(branchId) && !["all", branchId].includes(String(option.dataset.branchId || "all"));
+      });
+    }
+    return;
+  }
+  if (event.target.matches?.("[data-branch-status]")) {
+    const panel = event.target.closest("[data-branch-management]");
+    const status = event.target.value;
+    const query = panel?.querySelector("[data-branch-search]")?.value.trim().toLowerCase() || "";
+    let visible = 0;
+    panel?.querySelectorAll("[data-branch-row]").forEach((row) => {
+      const show = (!query || row.dataset.branchSearchText.includes(query)) && (status === "all" || row.dataset.branchStatusValue === status);
+      row.classList.toggle("hidden", !show);
+      if (show) visible += 1;
+    });
+    panel?.querySelector("[data-branch-filter-empty]")?.classList.toggle("hidden", visible > 0);
+    return;
+  }
   const input = event.target;
+  if (input.matches?.("[data-hospital-admin-branch]")) {
+    hospitalAdminBranchId = input.value || "all";
+    render();
+    return;
+  }
   if (input.matches?.("[data-progressive-toggle]")) {
     const form = input.closest("form");
     const fields = form?.querySelector(`[data-progressive-fields="${input.dataset.progressiveToggle}"]`);
@@ -13300,6 +13830,28 @@ document.addEventListener("change", async (event) => {
 });
 
 document.addEventListener("input", (event) => {
+  if (event.target.matches?.('.branch-form input, .branch-form select, .staff-form input, .staff-form select, .hospital-profile-form input, .hospital-profile-form select')) event.target.setCustomValidity?.("");
+  if (event.target.matches?.("[data-branch-search]")) {
+    const panel = event.target.closest("[data-branch-management]");
+    const query = event.target.value.trim().toLowerCase();
+    const status = panel?.querySelector("[data-branch-status]")?.value || "all";
+    let visible = 0;
+    panel?.querySelectorAll("[data-branch-row]").forEach((row) => {
+      const show = (!query || row.dataset.branchSearchText.includes(query)) && (status === "all" || row.dataset.branchStatusValue === status);
+      row.classList.toggle("hidden", !show);
+      if (show) visible += 1;
+    });
+    panel?.querySelector("[data-branch-filter-empty]")?.classList.toggle("hidden", visible > 0);
+    return;
+  }
+  if (event.target.matches("[data-vitals-patient-search], [data-existing-patient-search]")) {
+    const selector = event.target.matches("[data-vitals-patient-search]") ? "[data-vitals-patient-select]" : "[data-existing-patient-select]";
+    const select = event.target.closest("form")?.querySelector(selector);
+    const query = event.target.value.trim().toLowerCase();
+    select?.querySelectorAll("option[data-search]").forEach((option) => { option.hidden = Boolean(query) && !option.dataset.search.includes(query); });
+    if (select) select.value = "";
+    return;
+  }
   const input = event.target;
   if (input.matches?.("[data-admission-search]")) {
     setAdmissionSearchQuery(input.value);

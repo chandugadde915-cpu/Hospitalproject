@@ -5,21 +5,9 @@ export function badge(label, className) {
 }
 
 export function emptyState(message) {
-  const lower = String(message || "").toLowerCase();
-  const suggestion =
-    lower.includes("handover") ? "Create handover to capture the next shift plan clearly." :
-    lower.includes("purchase") ? "Create purchase request when stock needs replenishment." :
-    lower.includes("compliance") ? "Configure R2 storage, privacy checks, or policy records before go-live." :
-    lower.includes("patient") ? "Create or search for a patient to continue the hospital flow." :
-    lower.includes("bill") ? "All payments are clear for now, or generate a bill when the visit is ready." :
-    lower.includes("stock") || lower.includes("medicine") ? "Inventory is healthy, or use Add Stock when a medicine needs replenishment." :
-    lower.includes("review") ? "All user permissions are up to date for the selected scope." :
-    "Use the primary action on this page when you are ready to add the first record.";
   return `
-    <div class="empty">
-      <span class="empty-icon" aria-hidden="true">+</span>
+    <div class="empty compact-empty-state">
       <strong>${escapeHtml(message)}</strong>
-      <small>${escapeHtml(suggestion)}</small>
     </div>
   `;
 }

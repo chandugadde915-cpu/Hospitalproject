@@ -1672,7 +1672,7 @@ export const ROLE_PERMISSIONS = {
   },
   [ROLES.HOSPITAL_ADMIN]: {
     dashboard: readExport,
-    hospitals: { view: true },
+    hospitals: { view: true, create: true, edit: true },
     branches: allActions,
     users: { view: true, create: true, edit: true, delete: true, manageUsers: true },
     accessReview: { view: true, edit: true, export: true, manageUsers: true },
@@ -1697,32 +1697,14 @@ export const ROLE_PERMISSIONS = {
     tasks: opsActions,
     appointments: readExport,
     patients: readExport,
-    emr: readExport,
-    queue: readExport,
-    vitals: readExport,
-    consultation: readExport,
-    lab: readExport,
-    radiology: readExport,
-    pharmacy: readExport,
     billing: readExport,
     checkout: readExport,
     followups: readExport,
     admissions: readExport,
     ipd: readExport,
     wards: readExport,
-    dailySheets: readExport,
-    dutyDoctor: readExport,
-    nursing: readExport,
-    ipdVitals: readExport,
-    mar: readExport,
-    intakeOutput: readExport,
-    handover: readExport,
     discharge: readExport,
-    ot: readExport,
-    deathSummary: readExport,
     mortuary: readExport,
-    ipdReports: readExport,
-    ipdAlerts: readExport,
     claims: readExport,
     records: readExport,
     staff: readExport,
@@ -1884,38 +1866,26 @@ export const NAV_BY_ROLE = {
   ],
   [ROLES.HOSPITAL_ADMIN]: [
     ["dashboard", "Dashboard"],
-    ["branches", "Hospital Branches"],
+    ["hospitals", "Hospital Profile"],
+    ["branches", "Branch Management"],
     ["users", "Branch Admins"],
-    ["records", "Operations Overview"],
-    ["appointments", "Appointments"],
+    ["masterData", "Departments"],
+    ["staffRoster", "Staff Management"],
+    ["permissionTemplates", "Roles & Permissions"],
     ["patients", "Patients"],
-    ["emr", "EMR / EHR"],
-    ["queue", "Patient Flow"],
-    ["ipd", "IPD Overview"],
-    ["ipdPatient360", "IPD Patient 360"],
-    ["ot", "Operation Theatre"],
-    ["mortuary", "Mortuary & Death Reg."],
-    ["ipdReports", "Daily IPD Report"],
+    ["appointments", "Appointments"],
+    ["ipd", "OPD / IPD"],
+    ["wards", "Wards & Beds"],
     ["billing", "Billing"],
-    ["stock", "Stock Logic"],
-    ["claims", "Claims"],
-    ["setup", "Setup Wizard"],
-    ["masterData", "Master Data"],
-    ["doctorSchedule", "Doctor Schedule"],
-    ["staffRoster", "Duty Roster"],
-    ["finance", "Finance"],
-    ["documents", "Documents"],
+    ["finance", "Services & Pricing"],
+    ["stock", "Pharmacy Inventory"],
+    ["records", "Laboratory Management"],
+    ["compliance", "Radiology Management"],
+    ["inventory", "Inventory"],
+    ["reports", "Reports & Analytics"],
     ["notifications", "Notifications"],
-    ["feedback", "Feedback"],
-    ["compliance", "Compliance"],
-    ["globalSearch", "Global Search"],
-    ["alerts", "Alerts"],
-    ["reports", "Reports"],
-    ["accessReview", "User Access Review"],
-    ["permissionTemplates", "Permission Templates"],
-    ["audit", "Audit Trail"],
-    ["settings", "Settings"],
-    ["productFlow", "Product Flow"]
+    ["audit", "Audit Logs"],
+    ["settings", "Settings"]
   ],
   [ROLES.BRANCH_ADMIN]: [
     ["dashboard", "Dashboard"],
@@ -2234,13 +2204,39 @@ export function canAccessPage(user, page) {
 
   const role = normalizeRoleName(user.role || user.roleLevel);
 
+  const hospitalAdminClinicalPages = new Set([
+    "emr",
+    "queue",
+    "vitals",
+    "consultation",
+    "lab",
+    "radiology",
+    "pharmacy",
+    "dailySheets",
+    "dutyDoctor",
+    "nursing",
+    "ipdVitals",
+    "mar",
+    "intakeOutput",
+    "handover",
+    "ot",
+    "deathSummary",
+    "ipdReports",
+    "ipdAlerts",
+    "ipdPatient360"
+  ]);
+
+  if (role === ROLES.HOSPITAL_ADMIN && hospitalAdminClinicalPages.has(normalizedPage)) {
+    return false;
+  }
+
   if (normalizedPage === "ipdPatient360") {
     return hasPermission(user, "ipd", "view");
   }
 
   if (
     normalizedPage === "hospitals" &&
-    role !== ROLES.SUPER_ADMIN
+    ![ROLES.SUPER_ADMIN, ROLES.HOSPITAL_ADMIN].includes(role)
   ) {
     return false;
   }
@@ -2286,7 +2282,9 @@ export function canSeeRecord(user, record) {
 
 export function canSeeWorkflowItem(user, item, module) {
   if (user.role === ROLES.SUPER_ADMIN) return true;
-  if (user.role === ROLES.HOSPITAL_ADMIN) return item.hospitalId === user.hospitalId;
+  if (user.role === ROLES.HOSPITAL_ADMIN) {
+    return item.hospitalId === user.hospitalId && hasPermission(user, module, "view");
+  }
   if (user.role === ROLES.BRANCH_ADMIN) return item.hospitalId === user.hospitalId && item.branchId === user.branchId;
   return item.hospitalId === user.hospitalId && item.branchId === user.branchId && hasPermission(user, module, "view");
 }

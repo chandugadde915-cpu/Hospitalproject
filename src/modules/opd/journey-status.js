@@ -24,6 +24,6 @@ export function findOpdVitalsForQueue(vitals = [], queueToken = {}) {
 
 export function opdVitalsStage(queueToken, vitals = []) {
   if (findOpdVitalsForQueue(vitals, queueToken)) return "Completed";
-  if (["Waiting", "Vitals Pending"].includes(queueToken?.status)) return "In Progress";
+  if (["Waiting", "Vitals Pending", "WAITING_FOR_VITALS"].includes(queueToken?.status)) return "In Progress";
   return "Pending";
 }
